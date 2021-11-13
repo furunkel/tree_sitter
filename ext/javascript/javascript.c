@@ -1,6 +1,7 @@
 #include "ruby.h"
 
 extern const void *tree_sitter_javascript(void);
+extern void require_core(void);
 
 static VALUE
 rb_javascript_initialize(int argc, VALUE *argv, VALUE self) {
@@ -13,9 +14,11 @@ rb_javascript_initialize(int argc, VALUE *argv, VALUE self) {
 
 void Init_javascript()
 {
+  rb_require("tree_sitter/core");
+
   VALUE mTreeSitter = rb_const_get(rb_cObject, rb_intern("TreeSitter"));
   VALUE cTree = rb_const_get(mTreeSitter, rb_intern("Tree"));
 
-  VALUE rb_cJavascript = rb_define_class_under(mTreeSitter, "JavascriptTree", cTree);
+  VALUE rb_cJavascript = rb_define_class_under(mTreeSitter, "Javascript", cTree);
   rb_define_method(rb_cJavascript, "initialize", rb_javascript_initialize, -1);
 }

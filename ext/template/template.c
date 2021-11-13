@@ -1,6 +1,7 @@
 #include "ruby.h"
 
 extern const void *tree_sitter_template(void);
+extern void require_core(void);
 
 static VALUE
 rb_template_initialize(int argc, VALUE *argv, VALUE self) {
@@ -13,9 +14,11 @@ rb_template_initialize(int argc, VALUE *argv, VALUE self) {
 
 void Init_template()
 {
+  rb_require("tree_sitter/core");
+
   VALUE mTreeSitter = rb_const_get(rb_cObject, rb_intern("TreeSitter"));
   VALUE cTree = rb_const_get(mTreeSitter, rb_intern("Tree"));
 
-  VALUE rb_cTemplate = rb_define_class_under(mTreeSitter, "TemplateTree", cTree);
+  VALUE rb_cTemplate = rb_define_class_under(mTreeSitter, "Template", cTree);
   rb_define_method(rb_cTemplate, "initialize", rb_template_initialize, -1);
 }

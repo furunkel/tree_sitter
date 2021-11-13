@@ -4,17 +4,20 @@
 #include "tree_sitter/api.h"
 #include "core.h"
 
-typedef struct ast_node_type {
+typedef struct {
   TSNode ts_node;
+  VALUE rb_tree;
 } AstNode;
 
-typedef struct point_type {
+typedef struct {
   TSPoint ts_point;
 } Point;
 
 void init_node();
 
-VALUE rb_new_node(TSNode ts_node);
+
+VALUE rb_node_text_(TSNode ts_node, VALUE rb_input);
+VALUE rb_new_node(VALUE rb_tree, TSNode ts_node);
 VALUE rb_node_to_s(VALUE self);
 VALUE rb_node_type(VALUE self);
 VALUE rb_node_start_point(VALUE self);

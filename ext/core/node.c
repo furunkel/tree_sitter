@@ -8,15 +8,22 @@ static void node_free(void *n)
   xfree(n);
 }
 
+static void node_mark(void *n) {
+  AstNode *node = (AstNode *) n;
+  rb_gc_mark(node->rb_tree);
+}
+
 void point_free(void *p)
 {
   xfree(p);
 }
 
+extern const rb_data_type_t tree_type;
+
 static const rb_data_type_t node_type = {
     .wrap_struct_name = "node",
     .function = {
-        .dmark = NULL,
+        .dmark = node_mark,
         .dfree = node_free,
         .dsize = NULL,
     },
@@ -36,9 +43,11 @@ static const rb_data_type_t point_type = {
 };
 
 
-VALUE rb_new_node(TSNode ts_node)
+VALUE rb_new_node(VALUE rb_tree, TSNode ts_node)
 {
   AstNode *node = RB_ZALLOC(AstNode);
+  node->ts_node = ts_node;
+  node->rb_tree = rb_tree;
   return TypedData_Wrap_Struct(rb_cNode, &node_type, node);
 }
 
@@ -51,7 +60,6 @@ VALUE rb_node_to_s(VALUE self)
 {
   AstNode *node;
   TypedData_Get_Struct(self, AstNode, &node_type, node);
-
   return rb_str_new_cstr(ts_node_string(node->ts_node));
 }
 
@@ -157,7 +165,7 @@ VALUE rb_node_first_child(VALUE self)
   if (ts_node_is_null(child)) {
     return Qnil;
   } else {
-    return rb_new_node(child);
+    return rb_new_node(node->rb_tree, child);
   }
 }
 
@@ -176,7 +184,7 @@ VALUE rb_node_first_named_child(VALUE self)
   if (ts_node_is_null(child)) {
     return Qnil;
   } else {
-    return rb_new_node(child);
+    return rb_new_node(node->rb_tree, child);
   }
 }
 
@@ -193,7 +201,7 @@ VALUE rb_node_last_child(VALUE self)
   uint32_t child_count = ts_node_child_count(node->ts_node);
   if (child_count > 0) {
     TSNode child = ts_node_child(node->ts_node, child_count - 1);
-    return rb_new_node(child);
+    return rb_new_node(node->rb_tree, child);
   } else {
     return Qnil;
   }
@@ -212,7 +220,7 @@ VALUE rb_node_last_named_child(VALUE self)
   uint32_t child_count = ts_node_named_child_count(node->ts_node);
   if (child_count > 0) {
     TSNode child = ts_node_named_child(node->ts_node, child_count - 1);
-    return rb_new_node(child);
+    return rb_new_node(node->rb_tree, child);
   } else {
     return Qnil;
   }
@@ -237,7 +245,7 @@ VALUE rb_node_child(VALUE self, VALUE child_index)
     return Qnil;
   } else {
     TSNode child = ts_node_child(node->ts_node, i);
-    return rb_new_node(child);
+    return rb_new_node(node->rb_tree, child);
   }
 }
 
@@ -260,8 +268,46 @@ VALUE rb_node_named_child(VALUE self, VALUE child_index)
     return Qnil;
   } else {
     TSNode child = ts_node_named_child(node->ts_node, i);
-    return rb_new_node(child);
+    return rb_new_node(node->rb_tree, child);
   }
+}
+
+/*
+ * Public: Return named children.
+ *
+ * Returns a {Array<Node>} or nil.
+ */
+VALUE rb_node_named_children(VALUE self)
+{
+  AstNode *node;
+  TypedData_Get_Struct(self, AstNode, &node_type, node);
+
+  uint32_t child_count = ts_node_named_child_count(node->ts_node);
+  VALUE rb_ary = rb_ary_new_capa(child_count);
+
+  for(uint32_t i = 0; i < child_count; i++) {
+    rb_ary_push(rb_ary, rb_new_node(node->rb_tree, ts_node_named_child(node->ts_node, i)));
+  }
+  return rb_ary;
+}
+
+/*
+ * Public: Return all children.
+ *
+ * Returns a {Array<Node>} or nil.
+ */
+VALUE rb_node_children(VALUE self)
+{
+  AstNode *node;
+  TypedData_Get_Struct(self, AstNode, &node_type, node);
+
+  uint32_t child_count = ts_node_child_count(node->ts_node);
+  VALUE rb_ary = rb_ary_new_capa(child_count);
+
+  for(uint32_t i = 0; i < child_count; i++) {
+    rb_ary_push(rb_ary, rb_new_node(node->rb_tree, ts_node_child(node->ts_node, i)));
+  }
+  return rb_ary;
 }
 
 /*
@@ -288,11 +334,47 @@ VALUE rb_point_column(VALUE self)
   return UINT2NUM(point->ts_point.column);
 }
 
+VALUE rb_node_text_(TSNode ts_node, VALUE rb_input) {
+  uint32_t start_byte = ts_node_start_byte(ts_node);
+  uint32_t end_byte = ts_node_end_byte(ts_node);
+  const char *input = RSTRING_PTR(rb_input);
+
+  size_t input_len = RSTRING_LEN(rb_input);
+
+  if(start_byte >= input_len || end_byte > input_len) {
+    rb_raise(rb_eRuntimeError, "text range exceeds input length (%ld-%ld > %ld)", start_byte, end_byte, input_len);
+    return Qnil;
+  }
+  return rb_str_new(input + start_byte, end_byte - start_byte);
+}
+
+VALUE rb_node_text(int argc, VALUE *argv, VALUE self)
+{
+  AstNode *node;
+  TypedData_Get_Struct(self, AstNode, &node_type, node);
+
+  VALUE rb_input = Qnil;
+  rb_scan_args(argc, argv, "01", &rb_input);
+
+  if(!NIL_P(rb_input)) {
+    Check_Type(rb_input, T_STRING);
+  } else {
+    Tree *tree;
+    TypedData_Get_Struct(self, Tree, &tree_type, tree);
+    rb_input = tree->rb_input;
+    if(NIL_P(rb_input)) {
+      rb_raise(rb_eArgError, "you need to provide the original input string or attach it when parsing");
+      return Qnil;
+    }
+  }
+  return rb_node_text_(node->ts_node, rb_input);
+}
+
 void init_node()
 {
-  VALUE tree_sitter = rb_define_module("TreeSitter");
+  VALUE rb_mTreeSitter = rb_define_module("TreeSitter");
 
-  rb_cNode = rb_define_class_under(tree_sitter, "Node", rb_cObject);
+  rb_cNode = rb_define_class_under(rb_mTreeSitter, "Node", rb_cObject);
   rb_define_method(rb_cNode, "to_s", rb_node_to_s, 0);
   rb_define_method(rb_cNode, "node_type", rb_node_type, 0);
   rb_define_method(rb_cNode, "named?", rb_node_is_named, 0);
@@ -306,6 +388,9 @@ void init_node()
   rb_define_method(rb_cNode, "named_child", rb_node_named_child, 1);
   rb_define_method(rb_cNode, "start_position", rb_node_start_point, 0);
   rb_define_method(rb_cNode, "end_position", rb_node_end_point, 0);
+  rb_define_method(rb_cNode, "children", rb_node_children, 0);
+  rb_define_method(rb_cNode, "named_children", rb_node_named_children, 0);
+  rb_define_method(rb_cNode, "text", rb_node_text, -1);
 
   rb_cPoint = rb_define_class_under(rb_cNode, "Point", rb_cObject);
   rb_define_method(rb_cPoint, "row", rb_point_row, 0);
