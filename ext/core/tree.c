@@ -44,6 +44,18 @@ static VALUE rb_tree_alloc(VALUE self)
 
 typedef const TSLanguage * (*TSLanguageFunc)();
 
+static const TSLanguage *
+get_language_from_class(VALUE klass) {
+  ID language_id = rb_intern("@__language__");
+  VALUE rb_language = rb_ivar_get(klass, language_id);
+  if(NIL_P(rb_language)) {
+    rb_raise(rb_eRuntimeError, "language missing, did you try to instantiate Tree directly?");
+    return Qnil;
+  }
+  TSLanguageFunc language_func = (TSLanguageFunc) NUM2ULL(rb_language);
+  return language_func();
+}
+
 /*
  * Public: Creates a new tree
  *
@@ -59,16 +71,10 @@ VALUE rb_tree_initialize(int argc, VALUE *argv, VALUE self)
   Tree *tree;
   TypedData_Get_Struct(self, Tree, &tree_type, tree);
 
-  ID language_id = rb_intern("@__language__");
-  VALUE rb_language = rb_ivar_get(self, language_id);
-  if(NIL_P(rb_language)) {
-    rb_raise(rb_eRuntimeError, "language missing, did you try to instantiate Tree directly?");
-    return Qnil;
-  }
-  TSLanguageFunc language_func = (TSLanguageFunc) NUM2ULL(rb_language);
-
+  VALUE rb_klass = rb_class_of(self);
+  const TSLanguage *language = get_language_from_class(rb_klass);
   TSParser *parser = ts_parser_new();
-  const TSLanguage *language = language_func();
+
   ts_parser_set_language(parser, language);
   TSTree *ts_tree = ts_parser_parse_string(parser, NULL, RSTRING_PTR(rb_input), RSTRING_LEN(rb_input));
   ts_parser_delete(parser);
@@ -107,23 +113,33 @@ static VALUE node_to_hash(TSNode node, Tree *tree, const char *field_name) {
   VALUE rb_hash = rb_hash_new();
 
   const char *type = ts_node_type(node);
-  VALUE rb_type = rb_str_new2(type);
+  VALUE rb_type;
+  if(type != NULL) {
+    rb_type = rb_str_new2(type);
+  } else {
+    rb_type = Qnil;
+  }
+
   uint32_t child_count = ts_node_child_count(node);
-  VALUE rb_children = rb_ary_new_capa(child_count);
+  uint32_t named_child_count = ts_node_named_child_count(node);
+  VALUE rb_children = Qnil;
+  if(named_child_count > 0) {
+    rb_children = rb_ary_new_capa(child_count);
 
-  for(uint32_t i = 0; i < child_count; i++) {
-    TSNode child_node = ts_node_child(node, i);
-    if(!ts_node_is_named(child_node)) continue;
+    for(uint32_t i = 0; i < child_count; i++) {
+      TSNode child_node = ts_node_child(node, i);
+      if(!ts_node_is_named(child_node)) continue;
 
-    const char *child_field_name = ts_node_field_name_for_child(node, i);
-    VALUE rb_child_hash = node_to_hash(child_node, tree, child_field_name);
-    rb_ary_push(rb_children, rb_child_hash);
+      const char *child_field_name = ts_node_field_name_for_child(node, i);
+      VALUE rb_child_hash = node_to_hash(child_node, tree, child_field_name);
+      rb_ary_push(rb_children, rb_child_hash);
+    }
   }
 
   rb_hash_aset(rb_hash, RB_ID2SYM(id_type), rb_type);
   rb_hash_aset(rb_hash, RB_ID2SYM(id_children), rb_children);
 
-  if(tree->rb_input != Qnil) {
+  if(named_child_count == 0 && tree->rb_input != Qnil) {
     VALUE rb_text = rb_node_text_(node, tree->rb_input);
     rb_hash_aset(rb_hash, RB_ID2SYM(id_text), rb_text);
   } else {
@@ -148,23 +164,52 @@ VALUE rb_tree_to_h(VALUE self)
   return node_to_hash(root_node, tree, NULL);
 }
 
-static void node_lex(TSNode node, Tree *tree, VALUE rb_ary, bool types) {
+static void node_lex(TSNode node, VALUE rb_input, VALUE rb_ary, bool types, bool comments) {
   uint32_t child_count = ts_node_child_count(node);
   if(child_count == 0) {
-    VALUE rb_text = rb_node_text_(node, tree->rb_input);
-    if(!types) {
-      rb_ary_push(rb_ary, rb_text);
-    } else {
-      VALUE rb_type = ID2SYM(rb_intern(ts_node_type(node)));
-      VALUE rb_pair = rb_assoc_new(rb_text, rb_type);
-      rb_ary_push(rb_ary, rb_pair);
+    const char *type;
+    if(types || !comments) {
+      type = ts_node_type(node);
+
+      // FIXME: do all languages use "comment" as type?
+      if(!comments && !strcmp(type, "comment")) {
+        return;
+      }
+    }
+
+    VALUE rb_text = rb_node_text_(node, rb_input);
+    if(!NIL_P(rb_text)) {
+      if(!types) {
+        rb_ary_push(rb_ary, rb_text);
+      } else {
+        VALUE rb_type = ID2SYM(rb_intern(type));
+        VALUE rb_pair = rb_assoc_new(rb_text, rb_type);
+        rb_ary_push(rb_ary, rb_pair);
+      }
     }
   } else {
     for(uint32_t i = 0; i < child_count; i++) {
       TSNode child_node = ts_node_child(node, i);
-      node_lex(child_node, tree, rb_ary, types);
+      node_lex(child_node, rb_input, rb_ary, types, comments);
     }
   }
+}
+
+VALUE rb_tree_lex_s(VALUE self, VALUE rb_input, VALUE rb_types, VALUE rb_comments)
+{
+  const TSLanguage *language = get_language_from_class(self);
+  TSParser *parser = ts_parser_new();
+  ts_parser_set_language(parser, language);
+  TSTree *ts_tree = ts_parser_parse_string(parser, NULL, RSTRING_PTR(rb_input), RSTRING_LEN(rb_input));
+  TSNode root_node = ts_tree_root_node(ts_tree);
+
+  VALUE rb_ary = rb_ary_new();
+  node_lex(root_node, rb_input, rb_ary, RTEST(rb_types), RTEST(rb_comments));
+
+  ts_parser_delete(parser);
+  ts_tree_delete(ts_tree);
+
+  return rb_ary;
 }
 
 
@@ -188,7 +233,7 @@ VALUE rb_tree_lex(int argc, VALUE *argv, VALUE self)
   TSNode root_node = ts_tree_root_node(tree->ts_tree);
 
   VALUE rb_ary = rb_ary_new();
-  node_lex(root_node, tree, rb_ary, RTEST(rb_types));
+  node_lex(root_node, tree->rb_input, rb_ary, RTEST(rb_types), true /*TODO*/);
 
   return rb_ary;
 }
@@ -232,9 +277,12 @@ void init_tree()
   rb_define_method(rb_cTree, "attach", rb_tree_attach, 1);
   rb_define_method(rb_cTree, "detach", rb_tree_detach, 0);
   rb_define_method(rb_cTree, "root_node", rb_tree_root_node, 0);
-  rb_define_method(rb_cTree, "to_h", rb_tree_to_h, 0);
   rb_define_method(rb_cTree, "lex", rb_tree_lex, -1);
 
-  VALUE rb_cTree_ = rb_singleton_class(rb_cTree);
-  rb_define_alias(rb_cTree_, "parse", "new");
+  rb_define_private_method(rb_cTree, "__to_h__", rb_tree_to_h, 0);
+
+  VALUE rb_cTree_s = rb_singleton_class(rb_cTree);
+  rb_define_private_method(rb_cTree_s, "__lex__", rb_tree_lex_s, 3);
+
+  rb_define_alias(rb_cTree_s, "parse", "new");
 }

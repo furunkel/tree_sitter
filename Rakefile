@@ -20,6 +20,10 @@ Rake::ExtensionTask.new('core') do |ext|
   ext.source_pattern = '**/*.{c,cc,cpp}'
 end
 
+task :console do
+  exec 'irb -I lib -r tree_sitter'
+end
+
 task default: %i[test rubocop]
 
  LANGUAGES = %w[javascript python go ruby java
@@ -42,38 +46,44 @@ LANGUAGES.each do |language|
 end
 
 
+template_dir = File.join(__dir__, 'ext', 'template')
 LANGUAGES.each do |language|
   language_underscore = language.gsub('-', '_')
+  dest_dir = File.join(__dir__, 'ext', language_underscore)
   task :"download_languages:#{language_underscore}" do
     require 'net/http'
-      url = "https://raw.githubusercontent.com/tree-sitter/tree-sitter-#{language}"
-      dest_dir = File.join(__dir__, 'ext', language_underscore)
-      cp_r File.join(__dir__, 'ext', 'template', '.'), dest_dir
-      %w[src/parser.c src/parser.cc src/scanner.c src/scanner.cc src/tree_sitter/parser.h src/tag.h].each do |filename|
-        file_url = "#{url}/master/#{filename}"
-        response = Net::HTTP.get_response(URI.parse(file_url))
-        if response.code == "200"
-          dest_filename = File.join(dest_dir, filename.sub('src/', ''))
-          mkdir_p File.dirname(dest_filename)
-          File.write(dest_filename, response.body)
-        else
-          puts "Failed to fetch #{filename} (#{response.code})"
-        end
+    url = "https://raw.githubusercontent.com/tree-sitter/tree-sitter-#{language}"
+    cp_r File.join(__dir__, 'ext', 'template', '.'), dest_dir
+    %w[src/parser.c src/parser.cc src/scanner.c src/scanner.cc src/tree_sitter/parser.h src/tag.h].each do |filename|
+      file_url = "#{url}/master/#{filename}"
+      response = Net::HTTP.get_response(URI.parse(file_url))
+      if response.code == "200"
+        dest_filename = File.join(dest_dir, filename.sub('src/', ''))
+        mkdir_p File.dirname(dest_filename)
+        File.write(dest_filename, response.body)
+      else
+        puts "Failed to fetch #{filename} (#{response.code})"
       end
+    end
+  end
 
-      %w[extconf.rb template.c].each do |filename|
-        path = File.join(dest_dir, filename)
-        transform_file(path) do |content|
-          content.gsub('template', language.gsub('-', '_'))
-                .gsub('Template', language.split('-').map(&:capitalize).join(''))
-                .gsub('TEMPLATE', language.gsub('-', '_').upcase)
-        end
+  task :"create_language_module:#{language_underscore}" do
+    %w[extconf.rb template.c].each do |filename|
+      path = File.join(dest_dir, filename)
+      orig_path = File.join(template_dir, filename)
+      cp orig_path, path
+      transform_file(path) do |content|
+        content.gsub('template', language.gsub('-', '_'))
+              .gsub('Template', language.split('-').map(&:capitalize).join(''))
+              .gsub('TEMPLATE', language.gsub('-', '_').upcase)
       end
-      mv File.join(dest_dir, 'template.c'), File.join(dest_dir, "#{language_underscore}.c")
+    end
+    mv File.join(dest_dir, 'template.c'), File.join(dest_dir, "#{language_underscore}.c")
   end
 end
 
 task :download_languages => LANGUAGES.map { :"download_languages:#{_1.gsub('-', '_')}" }
+task :create_language_modules => LANGUAGES.map { :"create_language_module:#{_1.gsub('-', '_')}" }
 
 task :update_tree_sitter do
   require 'tempfile'

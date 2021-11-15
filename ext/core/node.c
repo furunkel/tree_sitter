@@ -409,6 +409,10 @@ VALUE rb_node_text_(TSNode ts_node, VALUE rb_input) {
 
   size_t input_len = RSTRING_LEN(rb_input);
 
+  if(start_byte == end_byte) {
+    return Qnil;
+  }
+
   if(start_byte >= input_len || end_byte > input_len) {
     rb_raise(rb_eRuntimeError, "text range exceeds input length (%d-%d > %zu)", start_byte, end_byte, input_len);
     return Qnil;
