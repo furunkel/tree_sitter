@@ -4,8 +4,6 @@
 #include "tree_sitter/api.h"
 #include "core.h"
 
-static VALUE rb_eTreeError;
-
 typedef struct {
   TSTree *ts_tree;
   VALUE rb_input;

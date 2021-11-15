@@ -13,4 +13,6 @@
 
 #define CSTR2SYM(s) (ID2SYM(rb_intern((s))))
 
+extern VALUE rb_eTreeSitterError;
+
 void Init_treesitter();

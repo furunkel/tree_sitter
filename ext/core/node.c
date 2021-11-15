@@ -231,7 +231,7 @@ VALUE rb_node_last_named_child(VALUE self)
  *
  * Returns a {Node} or nil.
  */
-VALUE rb_node_child(VALUE self, VALUE child_index)
+VALUE rb_node_child_at(VALUE self, VALUE child_index)
 {
   Check_Type(child_index, T_FIXNUM);
   uint32_t i = NUM2UINT(child_index);
@@ -254,7 +254,7 @@ VALUE rb_node_child(VALUE self, VALUE child_index)
  *
  * Returns a {Node} or nil.
  */
-VALUE rb_node_named_child(VALUE self, VALUE child_index)
+VALUE rb_node_named_child_at(VALUE self, VALUE child_index)
 {
   Check_Type(child_index, T_FIXNUM);
   uint32_t i = NUM2UINT(child_index);
@@ -310,6 +310,74 @@ VALUE rb_node_children(VALUE self)
   return rb_ary;
 }
 
+static VALUE
+node_enum_length(VALUE rb_node, VALUE args, VALUE eobj)
+{
+  AstNode *node;
+  TypedData_Get_Struct(rb_node, AstNode, &node_type, node);
+  uint32_t child_count = ts_node_child_count(node->ts_node);
+  return UINT2NUM(child_count);
+}
+
+VALUE rb_node_each_child(VALUE self)
+{
+  AstNode *node;
+  TypedData_Get_Struct(self, AstNode, &node_type, node);
+  RETURN_SIZED_ENUMERATOR(self, 0, 0, node_enum_length);
+
+  uint32_t child_count = ts_node_child_count(node->ts_node);
+  for(uint32_t i = 0; i < child_count; i++) {
+    VALUE rb_child_node = rb_new_node(node->rb_tree, ts_node_child(node->ts_node, i));
+    rb_yield(rb_child_node);
+  }
+  return self;
+}
+
+VALUE rb_node_each_child_with_field_name(VALUE self)
+{
+  AstNode *node;
+  TypedData_Get_Struct(self, AstNode, &node_type, node);
+  RETURN_SIZED_ENUMERATOR(self, 0, 0, node_enum_length);
+
+  uint32_t child_count = ts_node_child_count(node->ts_node);
+  for(uint32_t i = 0; i < child_count; i++) {
+    const char *field_name = ts_node_field_name_for_child(node->ts_node, i);
+    VALUE rb_field_name = Qnil;
+
+    if(field_name) {
+      rb_field_name = rb_str_new_cstr(field_name);
+    }
+
+    VALUE rb_child_node = rb_new_node(node->rb_tree, ts_node_child(node->ts_node, i));
+    rb_yield_values(2, rb_child_node, rb_field_name);
+  }
+  return self;
+}
+
+
+static VALUE
+node_enum_named_length(VALUE rb_node, VALUE args, VALUE eobj)
+{
+  AstNode *node;
+  TypedData_Get_Struct(rb_node, AstNode, &node_type, node);
+  uint32_t child_count = ts_node_named_child_count(node->ts_node);
+  return UINT2NUM(child_count);
+}
+
+VALUE rb_node_each_named_child(VALUE self)
+{
+  AstNode *node;
+  TypedData_Get_Struct(self, AstNode, &node_type, node);
+  RETURN_SIZED_ENUMERATOR(self, 0, 0, node_enum_length);
+
+  uint32_t child_count = ts_node_named_child_count(node->ts_node);
+  for(uint32_t i = 0; i < child_count; i++) {
+    VALUE rb_child_node = rb_new_node(node->rb_tree, ts_node_named_child(node->ts_node, i));
+    rb_yield(rb_child_node);
+  }
+  return self;
+}
+
 /*
  * Public: Return the row for a point.
  *
@@ -342,32 +410,39 @@ VALUE rb_node_text_(TSNode ts_node, VALUE rb_input) {
   size_t input_len = RSTRING_LEN(rb_input);
 
   if(start_byte >= input_len || end_byte > input_len) {
-    rb_raise(rb_eRuntimeError, "text range exceeds input length (%ld-%ld > %ld)", start_byte, end_byte, input_len);
+    rb_raise(rb_eRuntimeError, "text range exceeds input length (%d-%d > %zu)", start_byte, end_byte, input_len);
     return Qnil;
   }
   return rb_str_new(input + start_byte, end_byte - start_byte);
 }
 
-VALUE rb_node_text(int argc, VALUE *argv, VALUE self)
+VALUE rb_node_text(VALUE self)
 {
   AstNode *node;
   TypedData_Get_Struct(self, AstNode, &node_type, node);
 
-  VALUE rb_input = Qnil;
-  rb_scan_args(argc, argv, "01", &rb_input);
-
-  if(!NIL_P(rb_input)) {
-    Check_Type(rb_input, T_STRING);
-  } else {
-    Tree *tree;
-    TypedData_Get_Struct(self, Tree, &tree_type, tree);
-    rb_input = tree->rb_input;
-    if(NIL_P(rb_input)) {
-      rb_raise(rb_eArgError, "you need to provide the original input string or attach it when parsing");
-      return Qnil;
-    }
+  Tree *tree;
+  TypedData_Get_Struct(self, Tree, &tree_type, tree);
+  VALUE rb_input = tree->rb_input;
+  if(NIL_P(rb_input)) {
+    rb_raise(rb_eTreeSitterError, "no input attached");
+    return Qnil;
   }
   return rb_node_text_(node->ts_node, rb_input);
+}
+
+VALUE
+rb_node_byte_range_(TSNode node) {
+  uint32_t start_byte = ts_node_start_byte(node);
+  uint32_t end_byte = ts_node_end_byte(node);
+  return rb_range_new(INT2FIX(start_byte), INT2FIX(end_byte - 1), FALSE);
+}
+
+static VALUE
+rb_node_byte_range(VALUE self) {
+  AstNode *node;
+  TypedData_Get_Struct(self, AstNode, &node_type, node);
+  return rb_node_byte_range_(node->ts_node);
 }
 
 void init_node()
@@ -376,7 +451,7 @@ void init_node()
 
   rb_cNode = rb_define_class_under(rb_mTreeSitter, "Node", rb_cObject);
   rb_define_method(rb_cNode, "to_s", rb_node_to_s, 0);
-  rb_define_method(rb_cNode, "node_type", rb_node_type, 0);
+  rb_define_method(rb_cNode, "type", rb_node_type, 0);
   rb_define_method(rb_cNode, "named?", rb_node_is_named, 0);
   rb_define_method(rb_cNode, "child_count", rb_node_child_count, 0);
   rb_define_method(rb_cNode, "named_child_count", rb_node_named_child_count, 0);
@@ -384,13 +459,17 @@ void init_node()
   rb_define_method(rb_cNode, "first_named_child", rb_node_first_named_child, 0);
   rb_define_method(rb_cNode, "last_child", rb_node_last_named_child, 0);
   rb_define_method(rb_cNode, "last_named_child", rb_node_last_named_child, 0);
-  rb_define_method(rb_cNode, "child", rb_node_child, 1);
-  rb_define_method(rb_cNode, "named_child", rb_node_named_child, 1);
+  rb_define_method(rb_cNode, "child_at", rb_node_child_at, 1);
+  rb_define_method(rb_cNode, "named_child_at", rb_node_named_child_at, 1);
   rb_define_method(rb_cNode, "start_position", rb_node_start_point, 0);
   rb_define_method(rb_cNode, "end_position", rb_node_end_point, 0);
   rb_define_method(rb_cNode, "children", rb_node_children, 0);
+  rb_define_method(rb_cNode, "each_child", rb_node_each_child, 0);
+  rb_define_method(rb_cNode, "each_child_with_field_name", rb_node_each_child_with_field_name, 0);
   rb_define_method(rb_cNode, "named_children", rb_node_named_children, 0);
-  rb_define_method(rb_cNode, "text", rb_node_text, -1);
+  rb_define_method(rb_cNode, "each_named_child", rb_node_each_named_child, 0);
+  rb_define_method(rb_cNode, "text", rb_node_text, 0);
+  rb_define_method(rb_cNode, "byte_range", rb_node_byte_range, 0);
 
   rb_cPoint = rb_define_class_under(rb_cNode, "Point", rb_cObject);
   rb_define_method(rb_cPoint, "row", rb_point_row, 0);

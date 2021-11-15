@@ -3,6 +3,7 @@
 
 static VALUE rb_cTree;
 static ID id_type;
+static ID id_types;
 static ID id_byte_range;
 static ID id_children;
 static ID id_attach;
@@ -23,7 +24,7 @@ static void tree_mark(void *obj) {
 const rb_data_type_t tree_type = {
     .wrap_struct_name = "tree",
     .function = {
-        .dmark = NULL,
+        .dmark = tree_mark,
         .dfree = tree_free,
         .dsize = NULL,
     },
@@ -102,13 +103,6 @@ VALUE rb_tree_root_node(VALUE self)
   return rb_new_node(self, ts_node);
 }
 
-static VALUE
-rb_node_byte_range_(TSNode node) {
-  uint32_t start_byte = ts_node_start_byte(node);
-  uint32_t end_byte = ts_node_end_byte(node);
-  return rb_range_new(INT2FIX(start_byte), INT2FIX(end_byte - 1), FALSE);
-}
-
 static VALUE node_to_hash(TSNode node, Tree *tree, const char *field_name) {
   VALUE rb_hash = rb_hash_new();
 
@@ -154,42 +148,76 @@ VALUE rb_tree_to_h(VALUE self)
   return node_to_hash(root_node, tree, NULL);
 }
 
-static void node_lex(TSNode node, Tree *tree, VALUE rb_ary) {
+static void node_lex(TSNode node, Tree *tree, VALUE rb_ary, bool types) {
   uint32_t child_count = ts_node_child_count(node);
   if(child_count == 0) {
     VALUE rb_text = rb_node_text_(node, tree->rb_input);
-    rb_ary_push(rb_ary, rb_text);
+    if(!types) {
+      rb_ary_push(rb_ary, rb_text);
+    } else {
+      VALUE rb_type = ID2SYM(rb_intern(ts_node_type(node)));
+      VALUE rb_pair = rb_assoc_new(rb_text, rb_type);
+      rb_ary_push(rb_ary, rb_pair);
+    }
   } else {
     for(uint32_t i = 0; i < child_count; i++) {
       TSNode child_node = ts_node_child(node, i);
-      node_lex(child_node, tree, rb_ary);
+      node_lex(child_node, tree, rb_ary, types);
     }
   }
 }
 
 
-VALUE rb_tree_lex(VALUE self)
+VALUE rb_tree_lex(int argc, VALUE *argv, VALUE self)
 {
   Tree *tree;
-
   TypedData_Get_Struct(self, Tree, &tree_type, tree);
 
   if(tree->rb_input == Qnil) {
     return Qnil;
   }
 
+  VALUE rb_options;
+  rb_scan_args(argc, argv, ":", &rb_options);
+
+  VALUE rb_types = Qfalse;
+  if(!NIL_P(rb_options)) {
+    rb_types = rb_hash_aref(rb_options, ID2SYM(id_types));
+  }
+
   TSNode root_node = ts_tree_root_node(tree->ts_tree);
 
   VALUE rb_ary = rb_ary_new();
-  node_lex(root_node, tree, rb_ary);
+  node_lex(root_node, tree, rb_ary, RTEST(rb_types));
 
   return rb_ary;
+}
+
+VALUE rb_tree_attach(VALUE self, VALUE rb_input) {
+  Tree *tree;
+  TypedData_Get_Struct(self, Tree, &tree_type, tree);
+
+  Check_Type(rb_input, T_STRING);
+
+  tree->rb_input = rb_input;
+  return self;
+}
+
+VALUE rb_tree_detach(VALUE self) {
+  Tree *tree;
+  TypedData_Get_Struct(self, Tree, &tree_type, tree);
+
+  VALUE rb_input = tree->rb_input;
+  tree->rb_input = Qnil;
+
+  return rb_input;
 }
 
 void init_tree()
 {
 
   id_type = rb_intern("type");
+  id_types = rb_intern("types");
   id_byte_range = rb_intern("byte_range");
   id_children = rb_intern("children");
   id_attach = rb_intern("attach");
@@ -198,14 +226,14 @@ void init_tree()
 
   VALUE rb_mTreeSitter = rb_define_module("TreeSitter");
 
-  rb_eTreeError = rb_define_class_under(rb_mTreeSitter, "TreeError", rb_eStandardError);
-
   rb_cTree = rb_define_class_under(rb_mTreeSitter, "Tree", rb_cObject);
   rb_define_alloc_func(rb_cTree, rb_tree_alloc);
   rb_define_method(rb_cTree, "initialize", rb_tree_initialize, -1);
+  rb_define_method(rb_cTree, "attach", rb_tree_attach, 1);
+  rb_define_method(rb_cTree, "detach", rb_tree_detach, 0);
   rb_define_method(rb_cTree, "root_node", rb_tree_root_node, 0);
   rb_define_method(rb_cTree, "to_h", rb_tree_to_h, 0);
-  rb_define_method(rb_cTree, "lex", rb_tree_lex, 0);
+  rb_define_method(rb_cTree, "lex", rb_tree_lex, -1);
 
   VALUE rb_cTree_ = rb_singleton_class(rb_cTree);
   rb_define_alias(rb_cTree_, "parse", "new");
