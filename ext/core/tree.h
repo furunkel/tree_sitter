@@ -9,5 +9,9 @@ typedef struct {
   VALUE rb_input;
 } Tree;
 
+typedef struct {
+  TSTreeCursor ts_tree_cursor;
+  VALUE rb_tree;
+} TreeCursor;
+
 void init_tree();
-VALUE rb_tree_new(VALUE self, VALUE rb_str, VALUE rb_options);

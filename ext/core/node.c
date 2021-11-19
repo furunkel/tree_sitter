@@ -20,8 +20,8 @@ void point_free(void *p)
 
 extern const rb_data_type_t tree_type;
 
-static const rb_data_type_t node_type = {
-    .wrap_struct_name = "node",
+const rb_data_type_t node_type = {
+    .wrap_struct_name = "Node",
     .function = {
         .dmark = node_mark,
         .dfree = node_free,
@@ -32,7 +32,7 @@ static const rb_data_type_t node_type = {
 };
 
 static const rb_data_type_t point_type = {
-    .wrap_struct_name = "point",
+    .wrap_struct_name = "Point",
     .function = {
         .dmark = NULL,
         .dfree = point_free,
@@ -166,6 +166,20 @@ VALUE rb_node_first_child(VALUE self)
     return Qnil;
   } else {
     return rb_new_node(node->rb_tree, child);
+  }
+}
+
+VALUE rb_node_parent(VALUE self)
+{
+  AstNode *node;
+  TypedData_Get_Struct(self, AstNode, &node_type, node);
+
+  TSNode parent = ts_node_parent(node->ts_node);
+
+  if (ts_node_is_null(parent)) {
+    return Qnil;
+  } else {
+    return rb_new_node(node->rb_tree, parent);
   }
 }
 
@@ -449,6 +463,25 @@ rb_node_byte_range(VALUE self) {
   return rb_node_byte_range_(node->ts_node);
 }
 
+static VALUE
+rb_node_eq(VALUE self, VALUE rb_other) {
+  AstNode *node;
+  TypedData_Get_Struct(self, AstNode, &node_type, node);
+
+  if(!RB_TYPE_P(rb_other, RUBY_T_DATA)) {
+    return Qfalse;
+  }
+
+  if(!rb_typeddata_is_kind_of(rb_other, &node_type)) {
+    return Qfalse;
+  }
+
+  AstNode *other;
+  TypedData_Get_Struct(rb_other, AstNode, &node_type, other);
+
+  return ts_node_eq(node->ts_node, other->ts_node) ? Qtrue: Qfalse;
+}
+
 void init_node()
 {
   VALUE rb_mTreeSitter = rb_define_module("TreeSitter");
@@ -460,6 +493,7 @@ void init_node()
   rb_define_method(rb_cNode, "child_count", rb_node_child_count, 0);
   rb_define_method(rb_cNode, "named_child_count", rb_node_named_child_count, 0);
   rb_define_method(rb_cNode, "first_child", rb_node_first_child, 0);
+  rb_define_method(rb_cNode, "parent", rb_node_parent, 0);
   rb_define_method(rb_cNode, "first_named_child", rb_node_first_named_child, 0);
   rb_define_method(rb_cNode, "last_child", rb_node_last_named_child, 0);
   rb_define_method(rb_cNode, "last_named_child", rb_node_last_named_child, 0);
@@ -474,6 +508,8 @@ void init_node()
   rb_define_method(rb_cNode, "each_named_child", rb_node_each_named_child, 0);
   rb_define_method(rb_cNode, "text", rb_node_text, 0);
   rb_define_method(rb_cNode, "byte_range", rb_node_byte_range, 0);
+  rb_define_method(rb_cNode, "==", rb_node_eq, 1);
+  rb_define_method(rb_cNode, "eql?", rb_node_eq, 1);
 
   rb_cPoint = rb_define_class_under(rb_cNode, "Point", rb_cObject);
   rb_define_method(rb_cPoint, "row", rb_point_row, 0);

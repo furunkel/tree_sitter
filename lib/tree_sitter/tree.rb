@@ -35,46 +35,52 @@ module TreeSitter
       #'' => 'verilog'
     }.freeze
 
-    def self.lex(input, types: false, comments: true)
-      __lex__ input, types, comments
-    end
+    class << self
+      def fringe(input, types: false, comments: true, whitespace: false)
+        __fringe__ input, types, comments, whitespace
+      end
 
-    def self.for_filename(file_or_filename)
-      filename =
+      def for_filename(file_or_filename)
+        filename =
+          case file_or_filename
+          when String
+            file_or_filename
+          when file_or_filename.respond_to?(:to_path)
+            file_or_filename.to_path
+          else
+            raise ArgumentError, 'must pass string or file'
+          end
+
+        extension = File.extname(filename)
+        language = EXTENSION_MAP[extension]
+        raise "unknown file extension #{extension}" if language.nil?
+
+        require "tree_sitter/#{language}"
+        class_name = language.split('_').map(&:capitalize).join
+        TreeSitter.const_get(class_name)
+      end
+
+      def parse_file(file_or_filename, **kw_args)
         case file_or_filename
         when String
-          file_or_filename
+          filename = file_or_filename
+          content = File.read(file_or_filename)
         when file_or_filename.respond_to?(:to_path)
-          file_or_filename.to_path
+          filename = file_or_filename.to_path
+          content = file_or_filename.read
         else
           raise ArgumentError, 'must pass string or file'
         end
-
-      extension = File.extname(filename)
-      language = EXTENSION_MAP[extension]
-      raise "unknown file extension #{extension}" if language.nil?
-
-      require "tree_sitter/#{language}"
-      class_name = language.split('_').map(&:capitalize).join
-      TreeSitter.const_get(class_name)
-    end
-
-    def self.parse_file(file_or_filename, **kw_args)
-      case file_or_filename
-      when String
-        filename = file_or_filename
-        content = File.read(file_or_filename)
-      when file_or_filename.respond_to?(:to_path)
-        filename = file_or_filename.to_path
-        content = file_or_filename.read
-      else
-        raise ArgumentError, 'must pass string or file'
+        for_filename(filename).parse content, **kw_args
       end
-      for_filename(filename).parse content, **kw_args
     end
 
     def to_h
       __to_h__
+    end
+
+    def cursor
+      root_node.cursor
     end
 
   end
