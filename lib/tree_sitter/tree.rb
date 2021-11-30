@@ -75,6 +75,10 @@ module TreeSitter
       end
     end
 
+    def fringe(nodes: true, types: false, comments: true, whitespace: false)
+      __fringe__ nodes, types, comments, whitespace
+    end
+
     def to_h
       __to_h__
     end

@@ -211,6 +211,19 @@ rb_tree_to_h(VALUE self)
   return node_to_hash(root_node, tree, NULL);
 }
 
+
+static VALUE
+rb_tree_copy(VALUE self)
+{
+  Tree* tree;
+  TypedData_Get_Struct(self, Tree, &tree_type, tree);
+
+  Tree* clone = RB_ZALLOC(Tree);
+  clone->ts_tree = ts_tree_copy(tree->ts_tree);
+  clone->rb_input = tree->rb_input;
+  return TypedData_Wrap_Struct(rb_cTree, &tree_type, clone);
+}
+
 static void
 collect_leaf_nodes(TSNode node,
                    TSNode* leaf_ary,
@@ -303,27 +316,28 @@ add_whitespace_token(uint32_t prev_end_byte,
   }
 }
 
-VALUE
-rb_tree_fringe_s(VALUE self,
-                 VALUE rb_input,
-                 VALUE rb_types,
-                 VALUE rb_comments,
-                 VALUE rb_whitespace)
+static VALUE
+rb_tree_fringe_(VALUE self,
+                TSTree *ts_tree,
+                VALUE rb_input,
+                VALUE rb_types,
+                VALUE rb_comments,
+                VALUE rb_whitespace,
+                VALUE rb_nodes,
+                VALUE rb_tree)
 {
-  Check_Type(rb_input, T_STRING);
-
-  const TSLanguage* language = get_language_from_class(self);
-  TSParser* parser = ts_parser_new();
-  ts_parser_set_language(parser, language);
-  TSTree* ts_tree = ts_parser_parse_string(
-    parser, NULL, RSTRING_PTR(rb_input), RSTRING_LEN(rb_input));
   TSNode root_node = ts_tree_root_node(ts_tree);
-
   VALUE rb_ary = rb_ary_new();
 
   bool types = RB_TEST(rb_types);
   bool comments = RB_TEST(rb_comments);
   bool whitespace = RB_TEST(rb_whitespace);
+  bool nodes = RB_TEST(rb_nodes);
+
+  if(whitespace && nodes) {
+    rb_raise(rb_eArgError, "whitespace and nodes cannot be used together");
+    return Qnil;
+  }
 
   size_t leaf_ary_size = 512;
   size_t index = 0;
@@ -335,8 +349,6 @@ rb_tree_fringe_s(VALUE self,
   collect_leaf_nodes(root_node, leaf_ary, &index, &leaf_ary_size);
 
   qsort(leaf_ary, index, sizeof(TSNode), node_start_byte_cmp);
-
-  fprintf(stderr, "%zu %zu\n", index, leaf_ary_size);
 
   for (size_t i = 0; i < index; i++) {
     TSNode node = leaf_ary[i];
@@ -362,56 +374,71 @@ rb_tree_fringe_s(VALUE self,
       }
     }
 
-    VALUE rb_text = rb_node_text_(node, rb_input);
-    if (!NIL_P(rb_text)) {
-      if (!types) {
-        rb_ary_push(rb_ary, rb_text);
-      } else {
-        VALUE rb_type = ID2SYM(rb_intern(type));
-        VALUE rb_pair = rb_assoc_new(rb_text, rb_type);
-        rb_ary_push(rb_ary, rb_pair);
+    if(nodes) {
+      rb_ary_push(rb_ary, rb_new_node(rb_tree, node));
+    } else {
+      VALUE rb_text = rb_node_text_(node, rb_input);
+      if (!NIL_P(rb_text)) {
+        if (!types) {
+          rb_ary_push(rb_ary, rb_text);
+        } else {
+          VALUE rb_type = ID2SYM(rb_intern(type));
+          VALUE rb_pair = rb_assoc_new(rb_text, rb_type);
+          rb_ary_push(rb_ary, rb_pair);
+        }
       }
     }
   }
-
   if (whitespace && index > 0) {
     TSNode last_node = leaf_ary[index - 1];
     uint32_t last_end_byte = ts_node_end_byte(last_node);
     add_whitespace_token(last_end_byte, input_len, input, input_len, rb_ary, types);
   }
-
   xfree(leaf_ary);
+
+  return rb_ary;
+}
+
+VALUE
+rb_tree_fringe_s(VALUE self,
+                 VALUE rb_input,
+                 VALUE rb_types,
+                 VALUE rb_comments,
+                 VALUE rb_whitespace)
+{
+  Check_Type(rb_input, T_STRING);
+
+  const TSLanguage* language = get_language_from_class(self);
+  TSParser* parser = ts_parser_new();
+  ts_parser_set_language(parser, language);
+  TSTree* ts_tree = ts_parser_parse_string(
+    parser, NULL, RSTRING_PTR(rb_input), RSTRING_LEN(rb_input));
+
+  VALUE rb_ary = rb_tree_fringe_(self, ts_tree, rb_input, rb_types, rb_comments, rb_whitespace, Qfalse, Qnil);
+
   ts_parser_delete(parser);
   ts_tree_delete(ts_tree);
 
   return rb_ary;
 }
 
-// VALUE rb_tree_lex(int argc, VALUE *argv, VALUE self)
-// {
-//   Tree *tree;
-//   TypedData_Get_Struct(self, Tree, &tree_type, tree);
+VALUE rb_tree_fringe(VALUE self, 
+                     VALUE rb_nodes,
+                     VALUE rb_types,
+                     VALUE rb_comments,
+                     VALUE rb_whitespace
+)
+{
+  Tree *tree;
+  TypedData_Get_Struct(self, Tree, &tree_type, tree);
 
-//   if(tree->rb_input == Qnil) {
-//     return Qnil;
-//   }
-
-//   VALUE rb_options;
-//   rb_scan_args(argc, argv, ":", &rb_options);
-
-//   VALUE rb_types = Qfalse;
-//   if(!NIL_P(rb_options)) {
-//     rb_types = rb_hash_aref(rb_options, ID2SYM(id_types));
-//   }
-
-//   TSNode root_node = ts_tree_root_node(tree->ts_tree);
-
-//   VALUE rb_ary = rb_ary_new();
-//   collect_leaf_nodes(root_node, tree->rb_input, rb_ary, RTEST(rb_types), true
-//   /*TODO*/);
-
-//   return rb_ary;
-// }
+  if(NIL_P(tree->rb_input)) {
+    rb_raise(rb_eTreeSitterError, "no input attached");
+    return Qnil;
+  }
+  VALUE rb_ary = rb_tree_fringe_(self, tree->ts_tree, tree->rb_input, rb_types, rb_comments, rb_whitespace, rb_nodes, self);
+  return rb_ary;
+}
 
 VALUE
 rb_tree_attach(VALUE self, VALUE rb_input)
@@ -457,7 +484,7 @@ rb_tree_cursor_initialize(VALUE self, VALUE rb_node)
     TreeCursor* tree_cursor;                                                   \
     TypedData_Get_Struct(self, TreeCursor, &tree_cursor_type, tree_cursor);    \
     bool ret = ts_tree_cursor_##name(&tree_cursor->ts_tree_cursor);            \
-    return ret ? Qtrue : Qfalse;                                               \
+    return ret ? self : Qnil;                                                  \
   }
 
 TREE_CURSOR_NAV_METHOD(goto_parent)
@@ -539,9 +566,13 @@ init_tree()
   rb_define_method(rb_cTree, "attach", rb_tree_attach, 1);
   rb_define_method(rb_cTree, "detach", rb_tree_detach, 0);
   rb_define_method(rb_cTree, "root_node", rb_tree_root_node, 0);
-  // rb_define_method(rb_cTree, "lex", rb_tree_lex, -1);
+  rb_define_private_method(rb_cTree, "__fringe__", rb_tree_fringe, 4);
 
   rb_define_private_method(rb_cTree, "__to_h__", rb_tree_to_h, 0);
+
+  rb_define_method(rb_cTree, "clone", rb_tree_copy, 0);
+  rb_define_method(rb_cTree, "copy", rb_tree_copy, 0);
+
 
   VALUE rb_cTree_s = rb_singleton_class(rb_cTree);
   rb_define_private_method(rb_cTree_s, "__fringe__", rb_tree_fringe_s, 4);
