@@ -226,25 +226,19 @@ rb_tree_copy(VALUE self)
 
 static void
 collect_leaf_nodes(TSNode node,
-                   TSNode* leaf_ary,
+                   TSNode** leaf_ary,
                    size_t* index,
                    size_t* leaf_ary_size)
 {
   uint32_t child_count = ts_node_child_count(node);
   if (child_count == 0) {
     if (*index >= *leaf_ary_size) {
-      size_t new_leaf_ary_size = *leaf_ary_size * 2;
-      leaf_ary = ruby_xrealloc2(leaf_ary,
-                                sizeof(TSNode) * *leaf_ary_size,
-                                sizeof(TSNode) * new_leaf_ary_size);
-
-      // should raise an exception
-      if (leaf_ary == NULL)
-        return;
+      size_t new_leaf_ary_size = (*leaf_ary_size) * 2;
+      RB_REALLOC_N(*leaf_ary, TSNode, new_leaf_ary_size);
       *leaf_ary_size = new_leaf_ary_size;
     }
 
-    leaf_ary[*index] = node;
+    (*leaf_ary)[*index] = node;
     (*index)++;
 
   } else {
@@ -346,7 +340,7 @@ rb_tree_fringe_(VALUE self,
   char* input = RSTRING_PTR(rb_input);
   size_t input_len = RSTRING_LEN(rb_input);
 
-  collect_leaf_nodes(root_node, leaf_ary, &index, &leaf_ary_size);
+  collect_leaf_nodes(root_node, &leaf_ary, &index, &leaf_ary_size);
 
   qsort(leaf_ary, index, sizeof(TSNode), node_start_byte_cmp);
 

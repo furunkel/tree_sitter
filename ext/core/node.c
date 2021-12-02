@@ -666,7 +666,7 @@ int update_callback(st_data_t *key, st_data_t *value, st_data_t arg, int existin
 static void
 node_diff(VALUE rb_old, VALUE rb_new, IndexList *index_list, TableEntry *table_entries_old, st_table *overlap,
           st_table *_overlap, st_table *old_index_map, const char *input_old, const char *input_new,
-          uint32_t start_old, uint32_t len_old, uint32_t start_new, uint32_t len_new, VALUE rb_out_ary) {
+          uint32_t start_old, uint32_t len_old, uint32_t start_new, uint32_t len_new, VALUE rb_out_ary, bool output_eq) {
 
   if(len_old == 0 && len_new == 0) return;
 
@@ -767,10 +767,10 @@ node_diff(VALUE rb_old, VALUE rb_new, IndexList *index_list, TableEntry *table_e
     node_diff(rb_old, rb_new, index_list, table_entries_old, overlap, _overlap, old_index_map, input_old, input_new,
               start_old, sub_start_old - start_old,
               start_new, sub_start_new - start_new,
-              rb_out_ary);
+              rb_out_ary, output_eq);
 
 
-    {
+    if(output_eq) {
       rb_ary_push(rb_out_ary, rb_assoc_new(RB_ID2SYM(id_eq), rb_ary_subseq(rb_new, sub_start_new, sub_length)));
     }
 
@@ -781,13 +781,13 @@ node_diff(VALUE rb_old, VALUE rb_new, IndexList *index_list, TableEntry *table_e
     node_diff(rb_old, rb_new, index_list, table_entries_old, overlap, _overlap, old_index_map, input_old, input_new,
               sub_start_old + sub_length, (start_old + len_old) - (sub_start_old + sub_length),
               sub_start_new + sub_length, (start_new + len_new) - (sub_start_new + sub_length),
-              rb_out_ary);
+              rb_out_ary, output_eq);
 
   }
 }
 
 static VALUE
-rb_node_diff_s(VALUE self, VALUE rb_old, VALUE rb_new) {
+rb_node_diff_s(VALUE self, VALUE rb_old, VALUE rb_new, VALUE rb_output_eq) {
   size_t len_old = RARRAY_LEN(rb_old);
   size_t len_new = RARRAY_LEN(rb_new);
 
@@ -796,6 +796,8 @@ rb_node_diff_s(VALUE self, VALUE rb_old, VALUE rb_new) {
 
   Tree *tree_old = NULL;
   Tree *tree_new = NULL;
+
+  bool output_eq = RB_TEST(rb_output_eq);
 
   check_node_array(rb_old, &tree_old, &input_old);
   check_node_array(rb_new, &tree_new, &input_new);
@@ -816,7 +818,7 @@ rb_node_diff_s(VALUE self, VALUE rb_old, VALUE rb_new) {
   st_table *old_index_map = st_init_table_with_size(&type_table_entry_hash, 128);
 
   node_diff(rb_old, rb_new, &index_list, table_entries_old, overlap, _overlap, old_index_map,
-            input_old, input_new, 0, len_old, 0, len_new, rb_out_ary);
+            input_old, input_new, 0, len_old, 0, len_new, rb_out_ary, output_eq);
 
   st_free_table(overlap);
   st_free_table(_overlap);
@@ -862,7 +864,7 @@ void init_node()
   rb_define_method(rb_cNode, "hash", rb_node_hash, 0);
   rb_define_method(rb_cNode, "eql?", rb_node_eq, 1);
 
-  rb_define_singleton_method(rb_cNode, "diff", rb_node_diff_s, 2);
+  rb_define_singleton_method(rb_cNode, "__diff__", rb_node_diff_s, 3);
 
   rb_cPoint = rb_define_class_under(rb_cNode, "Point", rb_cObject);
   rb_define_method(rb_cPoint, "row", rb_point_row, 0);
