@@ -520,21 +520,14 @@ typedef struct {
   const char *input;
 } TableEntry;
 
-#define INDEX_LIST_ENTRY_CAPA 4
 #ifndef MAX
 #define MAX(a,b) (((a)<(b))?(b):(a))
 #endif
 
 typedef struct {
-  uint32_t len;
-  uint32_t next;
-  uint32_t data[INDEX_LIST_ENTRY_CAPA];
-} IndexListEntry;
-
-typedef struct {
   uint32_t capa;
   uint32_t len;
-  IndexListEntry *entries;
+  st_data_t *entries;
 } IndexList;
 
 // from st.c
@@ -582,46 +575,58 @@ static const struct st_hash_type type_table_entry_hash = {
     table_entry_hash,
 };
 
-static IndexListEntry *
-index_list_request_entry(IndexList *index_list) {
+// static IndexListEntry *
+// index_list_request_entry(IndexList *index_list) {
+//   if(!(index_list->len < index_list->capa)) {
+//     uint32_t new_capa = 2 * index_list->capa;
+//     RB_REALLOC_N(index_list->entries, IndexListEntry, new_capa);
+//     index_list->capa = new_capa;
+//   }
+//   IndexListEntry *entry = &index_list->entries[index_list->len];
+//   index_list->len++;
+//   return entry;
+// }
+
+
+static uint32_t
+index_list_append(IndexList *index_list, st_data_t pair) {
   if(!(index_list->len < index_list->capa)) {
     uint32_t new_capa = 2 * index_list->capa;
-    RB_REALLOC_N(index_list->entries, IndexListEntry, new_capa);
+    RB_REALLOC_N(index_list->entries, st_data_t, new_capa);
     index_list->capa = new_capa;
   }
-  IndexListEntry *entry = &index_list->entries[index_list->len];
+  uint32_t index = index_list->len;
+  index_list->entries[index] = pair;
   index_list->len++;
-  return entry;
+  return index;
 }
 
+//   if(entry == NULL) {
+//       ret_entry = index_list_request_entry(index_list);
+//       ret_entry->next = UINT32_MAX;
+//       ret_entry->len = 1;
+//       ret_entry->data[0] = value;
+//   } else {
+//     if(!(entry->len < INDEX_LIST_ENTRY_CAPA)) {
+//       ret_entry = index_list_request_entry(index_list);
+//       size_t entry_index = entry - index_list->entries;
+//       ret_entry->next = entry_index;
+//       ret_entry->len = 1;
+//       ret_entry->data[0] = value;
+//     } else {
+//       entry->data[entry->len] = value;
+//       entry->len++;
+//       ret_entry = entry;
+//     }
+//   }
 
-static IndexListEntry *
-index_list_append(IndexList *index_list, IndexListEntry *entry, uint32_t value) {
-  if(entry == NULL) {
-      IndexListEntry *new_entry = index_list_request_entry(index_list);
-      new_entry->next = UINT32_MAX;
-      new_entry->len = 1;
-      new_entry->data[0] = value;
-      return new_entry;
-  } else {
-    if(!(entry->len < INDEX_LIST_ENTRY_CAPA)) {
-      IndexListEntry *new_entry = index_list_request_entry(index_list);
-      size_t entry_index = entry - index_list->entries;
-      new_entry->next = entry_index;
-      new_entry->len = 1;
-      new_entry->data[0] = value;
-      return new_entry;
-    } else {
-      entry->data[entry->len] = value;
-      entry->len++;
-      return entry;
-    }
-  }
-
-}
+//   assert(ret_entry->next == UINT32_MAX || ret_entry->next < index_list->len);
+//   return ret_entry;
+// }
 
 static void
 check_node_array(VALUE rb_ary, Tree **tree_out, const char **input_out) {
+  Check_Type(rb_ary, T_ARRAY);
   size_t len = RARRAY_LEN(rb_ary);
   if(len > 0) {
     AstNode *first_node;
@@ -651,14 +656,24 @@ typedef struct {
   uint32_t value;
 } UpdateArg;
 
+_Static_assert(sizeof(st_data_t) >= 2 * sizeof(uint32_t));
+
+#define MAKE_PAIR64(f, s) ((((st_data_t)(s)) << 32) | ((st_data_t)(f)))
+#define PAIR64_FIRST(p) ((p) & 0xFFFFFFFF)
+#define PAIR64_SECOND(p) ((p) >> 32)
+
 int update_callback(st_data_t *key, st_data_t *value, st_data_t arg, int existing) {
   UpdateArg *update_arg = (UpdateArg *) arg;
   IndexList *index_list = update_arg->index_list;
   uint32_t insert_value = update_arg->value;
 
-  IndexListEntry *entry = existing ? (IndexListEntry *) (*value) : NULL;
-  IndexListEntry *new_entry = index_list_append(index_list, entry, insert_value);
-  *value = (st_data_t) (new_entry);
+  if(!existing) {
+    *value = MAKE_PAIR64(insert_value, UINT32_MAX);
+  } else {
+    uint32_t inserted_index = index_list_append(index_list, *value);
+    *value = MAKE_PAIR64(insert_value, inserted_index);
+  }
+
   return ST_CONTINUE;
 }
 
@@ -702,37 +717,38 @@ node_diff(VALUE rb_old, VALUE rb_new, IndexList *index_list, TableEntry *table_e
         .input = input_new
       };
 
-      IndexListEntry *list_entry;
+      st_data_t pair;
 
-      if(st_lookup(old_index_map, (st_data_t)&key, (st_data_t *) &list_entry)) {
-        IndexListEntry *iter = list_entry;
-        while(true) {
-          for(size_t i = 0; i < iter->len; i++) {
-            uint32_t iold = iter->data[i];
+      if(st_lookup(old_index_map, (st_data_t)&key, &pair)) {
+        for(size_t k = 0; k < 20; k++) {
+        // while(true) {
+          uint32_t value = PAIR64_FIRST(pair);
+          uint32_t next_index = PAIR64_SECOND(pair);
 
-            st_data_t prev_sub_len = 0;
+          uint32_t iold = value;
 
-            if(iold > start_old) {
-              st_lookup(overlap, (st_data_t) (iold - 1), (st_data_t *) &prev_sub_len);
-            }
+          st_data_t prev_sub_len = 0;
 
-            uint32_t new_sub_len = prev_sub_len + 1;
-            if(new_sub_len > sub_length) {
-                sub_length = new_sub_len;
-                sub_start_old = iold - sub_length + 1;
-                sub_start_new = inew - sub_length + 1;
-            }
-            assert(sub_length <= len_old);
-            assert(sub_length <= len_new);
-            assert(sub_start_old >= start_old);
-            assert(sub_start_new >= start_new);
-            st_insert(_overlap, (st_data_t) iold, new_sub_len);
+          if(iold > start_old) {
+            st_lookup(overlap, (st_data_t) (iold - 1), (st_data_t *) &prev_sub_len);
           }
 
-          if(iter->next == UINT32_MAX) {
+          uint32_t new_sub_len = prev_sub_len + 1;
+          if(new_sub_len > sub_length) {
+              sub_length = new_sub_len;
+              sub_start_old = iold - sub_length + 1;
+              sub_start_new = inew - sub_length + 1;
+          }
+          assert(sub_length <= len_old);
+          assert(sub_length <= len_new);
+          assert(sub_start_old >= start_old);
+          assert(sub_start_new >= start_new);
+          st_insert(_overlap, (st_data_t) iold, new_sub_len);
+
+          if(next_index == UINT32_MAX) {
             break;
           } else {
-            iter = &index_list->entries[iter->next];
+            pair = index_list->entries[next_index];
           }
         }
       }
@@ -809,13 +825,13 @@ rb_node_diff_s(VALUE self, VALUE rb_old, VALUE rb_new, VALUE rb_output_eq) {
   IndexList index_list;
   index_list.capa = len_old;
   index_list.len = 0;
-  index_list.entries = RB_ALLOC_N(IndexListEntry, index_list.capa);
+  index_list.entries = RB_ALLOC_N(st_data_t, index_list.capa);
 
   VALUE rb_out_ary = rb_ary_new_capa(MAX(len_old, len_new));
 
-  st_table *overlap = st_init_numtable_with_size(64);
-  st_table *_overlap = st_init_numtable_with_size(64);
-  st_table *old_index_map = st_init_table_with_size(&type_table_entry_hash, 128);
+  st_table *overlap = st_init_numtable_with_size(len_new);
+  st_table *_overlap = st_init_numtable_with_size(len_new);
+  st_table *old_index_map = st_init_table_with_size(&type_table_entry_hash, len_new / 4);
 
   node_diff(rb_old, rb_new, &index_list, table_entries_old, overlap, _overlap, old_index_map,
             input_old, input_new, 0, len_old, 0, len_new, rb_out_ary, output_eq);
