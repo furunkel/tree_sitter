@@ -705,7 +705,7 @@ node_diff(VALUE rb_old, VALUE rb_new, IndexList *index_list, TableEntry *table_e
     st_update(old_index_map, (st_data_t) key, update_callback, (st_data_t) &arg);
   }
 
-  if(true || len_old > 0) {
+  if(len_old > 0) {
     for(size_t inew = start_new; inew < start_new + len_new; inew++) {
       VALUE rb_node = RARRAY_AREF(rb_new, inew);
       AstNode *node = (AstNode *) DATA_PTR(rb_node);
@@ -773,6 +773,7 @@ node_diff(VALUE rb_old, VALUE rb_new, IndexList *index_list, TableEntry *table_e
     st_clear(_overlap);
     st_clear(overlap);
     st_clear(old_index_map);
+    index_list->len = 0;
 
     assert(sub_length <= len_old);
     assert(sub_length <= len_new);
@@ -792,6 +793,7 @@ node_diff(VALUE rb_old, VALUE rb_new, IndexList *index_list, TableEntry *table_e
     st_clear(_overlap);
     st_clear(overlap);
     st_clear(old_index_map);
+    index_list->len = 0;
 
     node_diff(rb_old, rb_new, index_list, table_entries_old, overlap, _overlap, old_index_map, input_old, input_new,
               sub_start_old + sub_length, (start_old + len_old) - (sub_start_old + sub_length),
@@ -828,9 +830,9 @@ rb_node_diff_s(VALUE self, VALUE rb_old, VALUE rb_new, VALUE rb_output_eq) {
 
   VALUE rb_out_ary = rb_ary_new_capa(MAX(len_old, len_new));
 
-  st_table *overlap = st_init_numtable_with_size(len_new);
-  st_table *_overlap = st_init_numtable_with_size(len_new);
-  st_table *old_index_map = st_init_table_with_size(&type_table_entry_hash, len_new / 4);
+  st_table *overlap = st_init_numtable();
+  st_table *_overlap = st_init_numtable();
+  st_table *old_index_map = st_init_table(&type_table_entry_hash);
 
   node_diff(rb_old, rb_new, &index_list, table_entries_old, overlap, _overlap, old_index_map,
             input_old, input_new, 0, len_old, 0, len_new, rb_out_ary, output_eq);
