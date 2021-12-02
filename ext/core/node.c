@@ -720,8 +720,7 @@ node_diff(VALUE rb_old, VALUE rb_new, IndexList *index_list, TableEntry *table_e
       st_data_t pair;
 
       if(st_lookup(old_index_map, (st_data_t)&key, &pair)) {
-        for(size_t k = 0; k < 20; k++) {
-        // while(true) {
+        while(true) {
           uint32_t value = PAIR64_FIRST(pair);
           uint32_t next_index = PAIR64_SECOND(pair);
 
