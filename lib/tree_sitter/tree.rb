@@ -71,8 +71,8 @@ module TreeSitter
       end
     end
 
-    def fringe(nodes: true, types: false, comments: true, whitespace: false)
-      __fringe__ nodes, types, comments, whitespace
+    def find_node_by_byte(goal_byte, path: false)
+      __find_node_by_byte__ goal_byte, path
     end
 
     def to_h
