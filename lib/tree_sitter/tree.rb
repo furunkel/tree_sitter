@@ -36,10 +36,6 @@ module TreeSitter
     }.freeze
 
     class << self
-      def fringe(input, types: false, comments: true, whitespace: false)
-        __fringe__ input, types, comments, whitespace
-      end
-
       def for_filename(file_or_filename)
         filename =
           case file_or_filename

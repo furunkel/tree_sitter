@@ -100,7 +100,7 @@ get_language_from_class(VALUE klass)
  * Public: Creates a new tree
  *
  */
-VALUE
+static VALUE
 rb_tree_initialize(int argc, VALUE* argv, VALUE self)
 {
   VALUE rb_input;
@@ -142,7 +142,7 @@ rb_tree_initialize(int argc, VALUE* argv, VALUE self)
  *
  * Returns a {Node}.
  */
-VALUE
+static VALUE
 rb_tree_root_node(VALUE self)
 {
   Tree* tree;
@@ -201,7 +201,7 @@ node_to_hash(TSNode node, Tree* tree, const char* field_name)
   return rb_hash;
 }
 
-VALUE
+static VALUE
 rb_tree_to_h(VALUE self)
 {
   Tree* tree;
@@ -224,30 +224,6 @@ rb_tree_copy(VALUE self)
   return TypedData_Wrap_Struct(rb_cTree, &tree_type, clone);
 }
 
-static void
-collect_leaf_nodes(TSNode node,
-                   TSNode** leaf_ary,
-                   size_t* index,
-                   size_t* leaf_ary_size)
-{
-  uint32_t child_count = ts_node_child_count(node);
-  if (child_count == 0) {
-    if (*index >= *leaf_ary_size) {
-      size_t new_leaf_ary_size = (*leaf_ary_size) * 2;
-      RB_REALLOC_N(*leaf_ary, TSNode, new_leaf_ary_size);
-      *leaf_ary_size = new_leaf_ary_size;
-    }
-
-    (*leaf_ary)[*index] = node;
-    (*index)++;
-
-  } else {
-    for (uint32_t i = 0; i < child_count; i++) {
-      TSNode child_node = ts_node_child(node, i);
-      collect_leaf_nodes(child_node, leaf_ary, index, leaf_ary_size);
-    }
-  }
-
   //   VALUE rb_text = rb_node_text_(node, rb_input);
   //   if(!NIL_P(rb_text)) {
   //     if(!types) {
@@ -264,177 +240,20 @@ collect_leaf_nodes(TSNode node,
   //     collect_leaf_nodes(child_node, rb_input, rb_ary, types, comments);
   //   }
   // }
-}
 
-static int
-node_start_byte_cmp(const void* a, const void* b)
-{
-  TSNode* node_a = (TSNode*)a;
-  TSNode* node_b = (TSNode*)b;
+// static int
+// node_start_byte_cmp(const void* a, const void* b)
+// {
+//   TSNode* node_a = (TSNode*)a;
+//   TSNode* node_b = (TSNode*)b;
 
-  uint32_t start_byte_a = ts_node_start_byte(*node_a);
-  uint32_t start_byte_b = ts_node_start_byte(*node_b);
+//   uint32_t start_byte_a = ts_node_start_byte(*node_a);
+//   uint32_t start_byte_b = ts_node_start_byte(*node_b);
 
-  return start_byte_a - start_byte_b;
-}
-
-static void
-add_whitespace_token(uint32_t prev_end_byte,
-                     uint32_t cur_start_byte,
-                     const char* input,
-                     size_t input_len,
-                     VALUE rb_ary,
-                     bool types)
-{
-
-  if (prev_end_byte < cur_start_byte && prev_end_byte > 0 &&
-      cur_start_byte <= input_len) {
-    bool all_whitespace = true;
-    for (size_t j = prev_end_byte; j < cur_start_byte; j++) {
-      if (!isspace(input[j])) {
-        all_whitespace = false;
-        break;
-      }
-    }
-    if (all_whitespace) {
-      VALUE rb_text = rb_usascii_str_new(input + prev_end_byte,
-                                         cur_start_byte - prev_end_byte);
-      if (!types) {
-        rb_ary_push(rb_ary, rb_text);
-      } else {
-        VALUE rb_type = ID2SYM(id_whitespace);
-        VALUE rb_pair = rb_assoc_new(rb_text, rb_type);
-        rb_ary_push(rb_ary, rb_pair);
-      }
-    }
-  }
-}
+//   return start_byte_a - start_byte_b;
+// }
 
 static VALUE
-rb_tree_fringe_(VALUE self,
-                TSTree *ts_tree,
-                VALUE rb_input,
-                VALUE rb_types,
-                VALUE rb_comments,
-                VALUE rb_whitespace,
-                VALUE rb_nodes,
-                VALUE rb_tree)
-{
-  TSNode root_node = ts_tree_root_node(ts_tree);
-  VALUE rb_ary = rb_ary_new();
-
-  bool types = RB_TEST(rb_types);
-  bool comments = RB_TEST(rb_comments);
-  bool whitespace = RB_TEST(rb_whitespace);
-  bool nodes = RB_TEST(rb_nodes);
-
-  if(whitespace && nodes) {
-    rb_raise(rb_eArgError, "whitespace and nodes cannot be used together");
-    return Qnil;
-  }
-
-  size_t leaf_ary_size = 512;
-  size_t index = 0;
-  TSNode* leaf_ary = RB_ALLOC_N(TSNode, leaf_ary_size);
-
-  char* input = RSTRING_PTR(rb_input);
-  size_t input_len = RSTRING_LEN(rb_input);
-
-  collect_leaf_nodes(root_node, &leaf_ary, &index, &leaf_ary_size);
-
-  qsort(leaf_ary, index, sizeof(TSNode), node_start_byte_cmp);
-
-  for (size_t i = 0; i < index; i++) {
-    TSNode node = leaf_ary[i];
-
-    const char* type = NULL;
-    if (types || !comments) {
-      type = ts_node_type(node);
-
-      // FIXME: do all languages use "comment" as type?
-      if (!comments && !strcmp(type, "comment")) {
-        continue;
-      }
-    }
-
-    if (whitespace) {
-      if (i > 0) {
-        TSNode prev_node = leaf_ary[i - 1];
-        uint32_t prev_end_byte = ts_node_end_byte(prev_node);
-        uint32_t cur_start_byte = ts_node_start_byte(node);
-
-        add_whitespace_token(
-          prev_end_byte, cur_start_byte, input, input_len, rb_ary, types);
-      }
-    }
-
-    if(nodes) {
-      rb_ary_push(rb_ary, rb_new_node(rb_tree, node));
-    } else {
-      VALUE rb_text = rb_node_text_(node, rb_input);
-      if (!NIL_P(rb_text)) {
-        if (!types) {
-          rb_ary_push(rb_ary, rb_text);
-        } else {
-          VALUE rb_type = ID2SYM(rb_intern(type));
-          VALUE rb_pair = rb_assoc_new(rb_text, rb_type);
-          rb_ary_push(rb_ary, rb_pair);
-        }
-      }
-    }
-  }
-  if (whitespace && index > 0) {
-    TSNode last_node = leaf_ary[index - 1];
-    uint32_t last_end_byte = ts_node_end_byte(last_node);
-    add_whitespace_token(last_end_byte, input_len, input, input_len, rb_ary, types);
-  }
-  xfree(leaf_ary);
-
-  return rb_ary;
-}
-
-VALUE
-rb_tree_fringe_s(VALUE self,
-                 VALUE rb_input,
-                 VALUE rb_types,
-                 VALUE rb_comments,
-                 VALUE rb_whitespace)
-{
-  Check_Type(rb_input, T_STRING);
-
-  const TSLanguage* language = get_language_from_class(self);
-  TSParser* parser = ts_parser_new();
-  ts_parser_set_language(parser, language);
-  TSTree* ts_tree = ts_parser_parse_string(
-    parser, NULL, RSTRING_PTR(rb_input), RSTRING_LEN(rb_input));
-
-  VALUE rb_ary = rb_tree_fringe_(self, ts_tree, rb_input, rb_types, rb_comments, rb_whitespace, Qfalse, Qnil);
-
-  ts_parser_delete(parser);
-  ts_tree_delete(ts_tree);
-
-  return rb_ary;
-}
-
-VALUE rb_tree_fringe(VALUE self, 
-                     VALUE rb_nodes,
-                     VALUE rb_types,
-                     VALUE rb_comments,
-                     VALUE rb_whitespace
-)
-{
-  Tree *tree;
-  TypedData_Get_Struct(self, Tree, &tree_type, tree);
-
-  if(NIL_P(tree->rb_input)) {
-    rb_raise(rb_eTreeSitterError, "no input attached");
-    return Qnil;
-  }
-  VALUE rb_ary = rb_tree_fringe_(self, tree->ts_tree, tree->rb_input, rb_types, rb_comments, rb_whitespace, rb_nodes, self);
-  return rb_ary;
-}
-
-VALUE
 rb_tree_attach(VALUE self, VALUE rb_input)
 {
   Tree* tree;
@@ -446,7 +265,7 @@ rb_tree_attach(VALUE self, VALUE rb_input)
   return self;
 }
 
-VALUE
+static VALUE
 rb_tree_detach(VALUE self)
 {
   Tree* tree;
@@ -458,7 +277,7 @@ rb_tree_detach(VALUE self)
   return rb_input;
 }
 
-VALUE
+static VALUE
 rb_tree_cursor_initialize(VALUE self, VALUE rb_node)
 {
   TreeCursor* tree_cursor;
@@ -486,15 +305,51 @@ TREE_CURSOR_NAV_METHOD(goto_first_child)
 TREE_CURSOR_NAV_METHOD(goto_next_sibling)
 
 static VALUE
+rb_tree_find_node_by_byte(VALUE self, VALUE rb_goal_byte, VALUE rb_return_path) {
+  Tree* tree;
+  TypedData_Get_Struct(self, Tree, &tree_type, tree);
+
+  uint32_t goal_byte = (uint32_t) FIX2UINT(rb_goal_byte);
+  TSNode ts_node = ts_tree_root_node(tree->ts_tree);
+  TSTreeCursor ts_tree_cursor = ts_tree_cursor_new(ts_node);
+
+  bool return_path = RB_TEST(rb_return_path);
+
+  VALUE rb_retval;
+
+  if(return_path) {
+    rb_retval = rb_ary_new();
+    rb_ary_push(rb_retval, rb_new_node(self, ts_node));
+  }
+
+  int64_t ret;
+
+  while((ret = ts_tree_cursor_goto_first_child_for_byte(&ts_tree_cursor, goal_byte)) != -1) {
+    if(return_path) {
+      VALUE rb_node = rb_new_node(self, ts_tree_cursor_current_node(&ts_tree_cursor));
+      rb_ary_push(rb_retval, rb_node);
+    }
+  }
+
+  if(!return_path) {
+    rb_retval = rb_new_node(self, ts_tree_cursor_current_node(&ts_tree_cursor));
+  }
+
+  ts_tree_cursor_delete(&ts_tree_cursor);
+
+  return rb_retval;
+}
+
+static VALUE
 rb_tree_cursor_goto_first_child_for_byte(VALUE self, VALUE rb_goal_byte)
 {
   TreeCursor* tree_cursor;
   TypedData_Get_Struct(self, TreeCursor, &tree_cursor_type, tree_cursor);
 
-  uint32_t goal_byte = (uint32_t)FIX2UINT(rb_goal_byte);
-  uint64_t ret = ts_tree_cursor_goto_first_child_for_byte(
+  uint32_t goal_byte = (uint32_t) FIX2UINT(rb_goal_byte);
+  int64_t ret = ts_tree_cursor_goto_first_child_for_byte(
     &tree_cursor->ts_tree_cursor, goal_byte);
-  return LL2NUM(ret);
+  return ret == -1 ? Qnil : LL2NUM(ret);
 }
 
 static VALUE
@@ -560,17 +415,13 @@ init_tree()
   rb_define_method(rb_cTree, "attach", rb_tree_attach, 1);
   rb_define_method(rb_cTree, "detach", rb_tree_detach, 0);
   rb_define_method(rb_cTree, "root_node", rb_tree_root_node, 0);
-  rb_define_private_method(rb_cTree, "__fringe__", rb_tree_fringe, 4);
-
+  rb_define_method(rb_cTree, "__find_node_by_byte__", rb_tree_find_node_by_byte, 2);
   rb_define_private_method(rb_cTree, "__to_h__", rb_tree_to_h, 0);
 
   rb_define_method(rb_cTree, "clone", rb_tree_copy, 0);
   rb_define_method(rb_cTree, "copy", rb_tree_copy, 0);
 
-
   VALUE rb_cTree_s = rb_singleton_class(rb_cTree);
-  rb_define_private_method(rb_cTree_s, "__fringe__", rb_tree_fringe_s, 4);
-
   rb_define_alias(rb_cTree_s, "parse", "new");
 
   rb_cTreeCursor = rb_define_class_under(rb_cTree, "Cursor", rb_cObject);
