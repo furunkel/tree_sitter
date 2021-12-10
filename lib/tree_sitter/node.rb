@@ -14,7 +14,8 @@ module TreeSitter
     end
 
     def inspect
-      self.text || "<empty>"
+      text = self.text&.then { %(#{_1.inspect} )}
+      "#<#{self.class}: #{text}#{type} (#{byte_range.inspect})>"
     end
   end
 end
