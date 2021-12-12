@@ -304,39 +304,74 @@ TREE_CURSOR_NAV_METHOD(goto_parent)
 TREE_CURSOR_NAV_METHOD(goto_first_child)
 TREE_CURSOR_NAV_METHOD(goto_next_sibling)
 
+static TSNode
+find_node_by_byte(TSNode node, uint32_t goal_byte) {
+  int64_t ret;
+  TSNode found_node;
+  TSTreeCursor tree_cursor = ts_tree_cursor_new(node);
+
+  while((ret = ts_tree_cursor_goto_first_child_for_byte(&tree_cursor, goal_byte)) != -1) {}
+  found_node = ts_tree_cursor_current_node(&tree_cursor);
+  ts_tree_cursor_delete(&tree_cursor);
+  return found_node;
+}
+
 static VALUE
-rb_tree_find_node_by_byte(VALUE self, VALUE rb_goal_byte, VALUE rb_return_path) {
+rb_tree_find_by_byte(VALUE self, VALUE rb_goal_byte) {
   Tree* tree;
   TypedData_Get_Struct(self, Tree, &tree_type, tree);
 
-  uint32_t goal_byte = (uint32_t) FIX2UINT(rb_goal_byte);
-  TSNode ts_node = ts_tree_root_node(tree->ts_tree);
-  TSTreeCursor ts_tree_cursor = ts_tree_cursor_new(ts_node);
+  VALUE *rb_goal_bytes;
+  size_t goal_bytes_len;
 
-  bool return_path = RB_TEST(rb_return_path);
-
-  VALUE rb_retval;
-
-  if(return_path) {
-    rb_retval = rb_ary_new();
-    rb_ary_push(rb_retval, rb_new_node(self, ts_node));
+  if(RB_TYPE_P(rb_goal_byte, T_ARRAY)) {
+    rb_goal_bytes = RARRAY_PTR(rb_goal_byte);
+    goal_bytes_len = RARRAY_LEN(rb_goal_byte);
+  } else {
+    Check_Type(rb_goal_byte, T_FIXNUM);
+    rb_goal_bytes = &rb_goal_byte;
+    goal_bytes_len = 1;
   }
 
-  int64_t ret;
+  TSNode prev_node;
+  TSNode root_node = ts_tree_root_node(tree->ts_tree);
 
-  while((ret = ts_tree_cursor_goto_first_child_for_byte(&ts_tree_cursor, goal_byte)) != -1) {
-    if(return_path) {
-      VALUE rb_node = rb_new_node(self, ts_tree_cursor_current_node(&ts_tree_cursor));
-      rb_ary_push(rb_retval, rb_node);
+  // TSNode *found_nodes = ALLOCA_N(TSNode, goal_bytes_len);
+
+  VALUE rb_retval = Qnil;
+  if(goal_bytes_len > 1) {
+    rb_retval = rb_ary_new_capa(goal_bytes_len);
+  }
+
+  for(size_t i = 0; i < goal_bytes_len; i++) {
+    uint32_t goal_byte = (uint32_t) FIX2UINT(rb_goal_bytes[i]);
+    TSNode search_node;
+
+    if(i > 0) {
+      uint32_t prev_start_byte = ts_node_start_byte(prev_node);
+      uint32_t prev_end_byte = ts_node_end_byte(prev_node);
+      if(goal_byte >= prev_start_byte && goal_byte < prev_end_byte) {
+        search_node = prev_node;
+      } else {
+        search_node = root_node;
+      }
+    } else {
+      search_node = root_node;
     }
+
+    TSNode node = find_node_by_byte(search_node, goal_byte);
+    if(goal_bytes_len > 1) {
+      if(node.id != prev_node.id) {
+        rb_ary_push(rb_retval, rb_new_node(self, node));
+      }
+    } else {
+      rb_retval = rb_new_node(self, node);
+      goto done;
+    }
+    prev_node = node;
   }
 
-  if(!return_path) {
-    rb_retval = rb_new_node(self, ts_tree_cursor_current_node(&ts_tree_cursor));
-  }
-
-  ts_tree_cursor_delete(&ts_tree_cursor);
-
+done:
   return rb_retval;
 }
 
@@ -415,7 +450,7 @@ init_tree()
   rb_define_method(rb_cTree, "attach", rb_tree_attach, 1);
   rb_define_method(rb_cTree, "detach", rb_tree_detach, 0);
   rb_define_method(rb_cTree, "root_node", rb_tree_root_node, 0);
-  rb_define_method(rb_cTree, "__find_node_by_byte__", rb_tree_find_node_by_byte, 2);
+  rb_define_method(rb_cTree, "__find_by_byte__", rb_tree_find_by_byte, 1);
   rb_define_private_method(rb_cTree, "__to_h__", rb_tree_to_h, 0);
 
   rb_define_method(rb_cTree, "clone", rb_tree_copy, 0);

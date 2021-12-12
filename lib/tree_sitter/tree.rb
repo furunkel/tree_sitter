@@ -71,8 +71,8 @@ module TreeSitter
       end
     end
 
-    def find_node_by_byte(goal_byte, path: false)
-      __find_node_by_byte__ goal_byte, path
+    def find_by_byte(goal_byte)
+      __find_by_byte__ goal_byte
     end
 
     def to_h
