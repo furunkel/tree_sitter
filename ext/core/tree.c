@@ -123,9 +123,9 @@ rb_tree_initialize(int argc, VALUE* argv, VALUE self)
 
   tree->ts_tree = ts_tree;
 
-  VALUE rb_attach = Qfalse;
+  VALUE rb_attach = Qtrue;
   if (!NIL_P(rb_options)) {
-    rb_attach = rb_hash_aref(rb_options, RB_ID2SYM(id_attach));
+    rb_attach = rb_hash_lookup2(rb_options, RB_ID2SYM(id_attach), Qtrue);
   }
 
   if (RTEST(rb_attach)) {
