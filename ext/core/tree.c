@@ -316,6 +316,119 @@ find_node_by_byte(TSNode node, uint32_t goal_byte) {
   return found_node;
 }
 
+static int
+node_id_cmp(const void* a, const void* b)
+{
+  TSNode** node_a = (TSNode**)a;
+  TSNode** node_b = (TSNode**)b;
+
+  int diff = (uintptr_t)(**node_a).id - (uintptr_t)(**node_b).id;
+  return diff;
+}
+
+static bool
+rb_tree_merge__(const TSNode *nodes, size_t len, TSNode *out_nodes, size_t *out_len) {
+  TSNode *parents = ALLOCA_N(TSNode, len);
+  bool change = false;
+  TSNode **parent_ptrs = ALLOCA_N(TSNode *, len);
+
+  for(size_t i = 0; i < len; i++) {
+    // if(ts_node_is_named(nodes[i])) {
+      parents[i] = ts_node_parent(nodes[i]);
+    // } else {
+    //   parents[i].id = 0;
+    // }
+    parent_ptrs[i] = &parents[i];
+  }
+
+  qsort(parent_ptrs, len, sizeof(TSNode *), node_id_cmp);
+
+  for(size_t i = 0; i < len; i++) {
+    TSNode *parent_ptr = parent_ptrs[i];
+    size_t parent_index = parent_ptr - parents;
+
+    /* unnamed child node - copy child */
+    // if(parent_ptr->id == 0) {
+    //   out_nodes[(*out_len)] = nodes[parent_index];
+    //   (*out_len)++;
+    // } else 
+    {
+      uint32_t j;
+      for(j = 1; i + j < len && parent_ptrs[i + j]->id == parent_ptr->id; j++) {}
+
+      //FIXME: use named child count?
+      // uint32_t child_count = ts_node_named_child_count(*parent_ptr);
+      uint32_t child_count = ts_node_child_count(*parent_ptr);
+
+      if(j >= child_count) {
+        out_nodes[(*out_len)] = *parent_ptr;
+        (*out_len)++;
+        i += j - 1;
+        change = true;
+      } else {
+        out_nodes[(*out_len)] = nodes[parent_index];
+        (*out_len)++;
+      }
+    }
+  }
+
+  return change;
+}
+
+static VALUE
+rb_tree_merge_(int argc, VALUE *argv, VALUE self) {
+  // should fit on the stack?
+  TSNode *nodes = ALLOCA_N(TSNode, argc);
+  VALUE rb_tree;
+  Tree *tree = NULL;
+
+  for(int i = 0; i < argc; i++) {
+    VALUE rb_node = argv[i];
+    AstNode *node;
+
+    TypedData_Get_Struct(rb_node, AstNode, &node_type, node);
+    rb_tree = node->rb_tree;
+    Tree *tree_ = (Tree *) DATA_PTR(rb_tree);
+    if(tree != NULL && tree != tree_) {
+      rb_raise(rb_eTreeSitterError, "nodes belong to different trees");
+      return Qnil;
+    }
+    tree = tree_;
+    nodes[i] = node->ts_node;
+  }
+
+  size_t len = argc;
+  TSNode *out_nodes = ALLOCA_N(TSNode, argc);
+
+  int i = 0;
+redo:
+  size_t out_len = 0;
+  bool change = rb_tree_merge__(nodes, len, out_nodes, &out_len);
+
+  if(change && i++ < 20) {
+    TSNode *tmp = nodes;
+    nodes = out_nodes;
+    out_nodes = tmp;
+    len = out_len;
+    goto redo;
+  }
+
+  VALUE rb_ary = rb_ary_new_capa(out_len);
+  for(size_t i = 0; i < out_len; i++) {
+    rb_ary_push(rb_ary, rb_new_node(rb_tree, out_nodes[i]));
+  }
+  return rb_ary;
+}
+
+static VALUE
+rb_tree_merge(int argc, VALUE *argv, VALUE self) {
+  if(argc == 1 && RB_TYPE_P(argv[0], T_ARRAY)) {
+    return rb_tree_merge_(RARRAY_LEN(argv[0]), RARRAY_PTR(argv[0]), self);
+  } else {
+    return rb_tree_merge_(argc, argv, self);
+  }
+}
+
 static VALUE
 rb_tree_find_by_byte(VALUE self, VALUE rb_goal_byte) {
   Tree* tree;
@@ -452,6 +565,7 @@ init_tree()
   rb_define_method(rb_cTree, "root_node", rb_tree_root_node, 0);
   rb_define_method(rb_cTree, "__find_by_byte__", rb_tree_find_by_byte, 1);
   rb_define_private_method(rb_cTree, "__to_h__", rb_tree_to_h, 0);
+  rb_define_singleton_method(rb_cTree, "merge", rb_tree_merge, -1);
 
   rb_define_method(rb_cTree, "clone", rb_tree_copy, 0);
   rb_define_method(rb_cTree, "copy", rb_tree_copy, 0);
