@@ -12,6 +12,14 @@ static ID id_field;
 static ID id_text;
 static ID id_whitespace;
 
+#ifndef MAX
+#define MAX(a,b) (((a)<(b))?(b):(a))
+#endif
+
+#ifndef MIN
+#define MIN(a,b) (((a)>(b))?(b):(a))
+#endif
+
 static void
 tree_free(void* obj)
 {
@@ -360,7 +368,7 @@ rb_tree_merge__(const TSNode *nodes, size_t len, TSNode *out_nodes, size_t *out_
       // uint32_t child_count = ts_node_named_child_count(*parent_ptr);
       uint32_t child_count = ts_node_child_count(*parent_ptr);
 
-      if(j >= child_count) {
+      if(child_count > 1 && j >= child_count) {
         out_nodes[(*out_len)] = *parent_ptr;
         (*out_len)++;
         i += j - 1;
@@ -376,10 +384,57 @@ rb_tree_merge__(const TSNode *nodes, size_t len, TSNode *out_nodes, size_t *out_
 }
 
 static VALUE
+rb_tree_find_common_parent_(int argc, VALUE *argv, VALUE self) {
+  // should fit on the stack?
+  VALUE rb_tree;
+  Tree *tree = NULL;
+  AstNode *node = NULL;
+  uint32_t min_byte = UINT32_MAX;
+  uint32_t max_byte = 0;
+
+  for(int i = 0; i < argc; i++) {
+    VALUE rb_node = argv[i];
+    AstNode *node_;
+
+    TypedData_Get_Struct(rb_node, AstNode, &node_type, node_);
+    rb_tree = node_->rb_tree;
+    Tree *tree_ = (Tree *) DATA_PTR(rb_tree);
+    if(tree != NULL && tree != tree_) {
+      rb_raise(rb_eTreeSitterError, "nodes belong to different trees");
+      return Qnil;
+    }
+    min_byte = MIN(min_byte, ts_node_start_byte(node_->ts_node));
+    max_byte = MAX(max_byte, ts_node_end_byte(node_->ts_node));
+
+    tree = tree_;
+    node = node_;
+  }
+
+  if(min_byte > max_byte) {
+    return Qnil;
+  } else {
+    TSNode n = node->ts_node;
+    while(!(ts_node_is_null(n) || (ts_node_start_byte(n) <= min_byte && ts_node_end_byte(n) >= max_byte))) {
+      n = ts_node_parent(n);
+    }
+    return rb_new_node(rb_tree, n);
+  }
+}
+
+static VALUE
+rb_tree_find_common_parent(int argc, VALUE *argv, VALUE self) {
+  if(argc == 1 && RB_TYPE_P(argv[0], T_ARRAY)) {
+    return rb_tree_find_common_parent_(RARRAY_LEN(argv[0]), RARRAY_PTR(argv[0]), self);
+  } else {
+    return rb_tree_find_common_parent_(argc, argv, self);
+  }
+}
+
+static VALUE
 rb_tree_merge_(int argc, VALUE *argv, VALUE self) {
   // should fit on the stack?
   TSNode *nodes = ALLOCA_N(TSNode, argc);
-  VALUE rb_tree;
+  VALUE rb_tree = Qnil;
   Tree *tree = NULL;
 
   for(int i = 0; i < argc; i++) {
@@ -566,6 +621,7 @@ init_tree()
   rb_define_method(rb_cTree, "__find_by_byte__", rb_tree_find_by_byte, 1);
   rb_define_private_method(rb_cTree, "__to_h__", rb_tree_to_h, 0);
   rb_define_singleton_method(rb_cTree, "merge", rb_tree_merge, -1);
+  rb_define_singleton_method(rb_cTree, "find_common_parent", rb_tree_find_common_parent, -1);
 
   rb_define_method(rb_cTree, "clone", rb_tree_copy, 0);
   rb_define_method(rb_cTree, "copy", rb_tree_copy, 0);
