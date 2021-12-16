@@ -1,7 +1,10 @@
 #include "ruby.h"
+#include "tree_sitter/api.h"
 
 extern const void *tree_sitter_template(void);
 extern void require_core(void);
+extern ID id___language__;
+extern VALUE rb_new_language(TSLanguage *ts_language);
 
 void Init_template()
 {
@@ -12,8 +15,8 @@ void Init_template()
 
   VALUE rb_cTemplate = rb_define_class_under(mTreeSitter, "Template", cTree);
 
-  ID language_id = rb_intern("@__language__");
   VALUE rb_cTemplate_s = rb_singleton_class(rb_cTemplate);
-  VALUE rb_language_func = ULL2NUM((uintptr_t) tree_sitter_template);
-  rb_ivar_set(rb_cTemplate, language_id, rb_language_func);
+  VALUE rb_language = rb_new_language((TSLanguage *)tree_sitter_template());
+
+  rb_ivar_set(rb_cTemplate, id___language__, rb_language);
 }

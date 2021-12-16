@@ -3,6 +3,8 @@
 
 static VALUE rb_cTree;
 static VALUE rb_cTreeCursor;
+static VALUE rb_cLanguage;
+
 static ID id_type;
 static ID id_types;
 static ID id_byte_range;
@@ -11,6 +13,7 @@ static ID id_attach;
 static ID id_field;
 static ID id_text;
 static ID id_whitespace;
+ID id___language__;
 
 #ifndef MAX
 #define MAX(a,b) (((a)<(b))?(b):(a))
@@ -74,6 +77,56 @@ const rb_data_type_t tree_cursor_type = {
     .flags = RUBY_TYPED_FREE_IMMEDIATELY,
 };
 
+
+static void
+language_free(void* obj)
+{
+  Language* language = (Language*)obj;
+  st_free_table(language->field_table);
+  xfree(language->ids);
+  xfree(obj);
+}
+
+/*static void
+language_mark(void* obj)
+{
+  // Language* language = (Language*)obj;
+  // rb_gc_mark(language->rb_input);
+}*/
+
+const rb_data_type_t language_type = {
+    .wrap_struct_name = "Language",
+    .function = {
+        .dmark = NULL /*language_mark*/,
+        .dfree = language_free,
+        .dsize = NULL,
+    },
+    .data = NULL,
+    .flags = RUBY_TYPED_FREE_IMMEDIATELY,
+};
+
+VALUE
+rb_new_language(TSLanguage *ts_language)
+{
+  Language *language = RB_ZALLOC(Language);
+  language->ts_language = ts_language;
+
+  uint32_t symbol_count = ts_language_symbol_count(ts_language);
+
+  language->field_table = st_init_numtable();
+  language->ids = RB_ALLOC_N(ID, symbol_count);
+
+  for(uint32_t i = 0; i < symbol_count; i++) {
+    const char *symbol_name = ts_language_symbol_name(ts_language, (TSSymbol) i);
+    ID symbol_id = rb_intern(symbol_name);
+    st_insert(language->field_table, (st_data_t) symbol_id, i);
+    language->ids[i] = symbol_id;
+  }
+
+  return TypedData_Wrap_Struct(rb_cLanguage, &language_type, language);
+}
+
+
 static VALUE
 rb_tree_alloc(VALUE self)
 {
@@ -88,20 +141,23 @@ rb_tree_cursor_alloc(VALUE self)
   return TypedData_Wrap_Struct(self, &tree_cursor_type, tree_cursor);
 }
 
-typedef const TSLanguage* (*TSLanguageFunc)();
-
-static const TSLanguage*
-get_language_from_class(VALUE klass)
+static VALUE
+rb_tree_language(VALUE self)
 {
-  ID language_id = rb_intern("@__language__");
-  VALUE rb_language = rb_ivar_get(klass, language_id);
-  if (NIL_P(rb_language)) {
-    rb_raise(rb_eRuntimeError,
-             "language missing, did you try to instantiate Tree directly?");
-    return Qnil;
-  }
-  TSLanguageFunc language_func = (TSLanguageFunc)NUM2ULL(rb_language);
-  return language_func();
+  Tree* tree;
+  TypedData_Get_Struct(self, Tree, &tree_type, tree);
+
+  VALUE rb_klass = rb_class_of(self);
+  VALUE rb_language = rb_ivar_get(rb_klass, id___language__);
+  return rb_language;
+}
+
+Language *
+rb_tree_language_(VALUE self) {
+  VALUE rb_language = rb_tree_language(self);
+  Language* language;
+  TypedData_Get_Struct(rb_language, Language, &language_type, language);
+  return language;
 }
 
 /*
@@ -120,11 +176,11 @@ rb_tree_initialize(int argc, VALUE* argv, VALUE self)
   Tree* tree;
   TypedData_Get_Struct(self, Tree, &tree_type, tree);
 
-  VALUE rb_klass = rb_class_of(self);
-  const TSLanguage* language = get_language_from_class(rb_klass);
+  Language* language = rb_tree_language_(self);
+  TSLanguage *ts_language = language->ts_language;
   TSParser* parser = ts_parser_new();
 
-  ts_parser_set_language(parser, language);
+  ts_parser_set_language(parser, ts_language);
   TSTree* ts_tree = ts_parser_parse_string(
     parser, NULL, RSTRING_PTR(rb_input), RSTRING_LEN(rb_input));
   ts_parser_delete(parser);
@@ -609,6 +665,7 @@ init_tree()
   id_field = rb_intern("field");
   id_text = rb_intern("text");
   id_whitespace = rb_intern("whitespace");
+  id___language__ = rb_intern("@__language__");
 
   VALUE rb_mTreeSitter = rb_define_module("TreeSitter");
 
@@ -618,6 +675,8 @@ init_tree()
   rb_define_method(rb_cTree, "attach", rb_tree_attach, 1);
   rb_define_method(rb_cTree, "detach", rb_tree_detach, 0);
   rb_define_method(rb_cTree, "root_node", rb_tree_root_node, 0);
+  rb_define_method(rb_cTree, "language", rb_tree_language, 0);
+
   rb_define_method(rb_cTree, "__find_by_byte__", rb_tree_find_by_byte, 1);
   rb_define_private_method(rb_cTree, "__to_h__", rb_tree_to_h, 0);
   rb_define_singleton_method(rb_cTree, "merge", rb_tree_merge, -1);
@@ -653,4 +712,6 @@ init_tree()
     rb_cTreeCursor, "clone", rb_tree_cursor_copy, 0);
   rb_define_method(
     rb_cTreeCursor, "copy", rb_tree_cursor_copy, 0);
+
+  rb_cLanguage = rb_define_class_under(rb_mTreeSitter, "Language", rb_cObject);
 }

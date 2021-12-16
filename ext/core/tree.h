@@ -14,4 +14,12 @@ typedef struct {
   VALUE rb_tree;
 } TreeCursor;
 
+typedef struct {
+  TSLanguage *ts_language;
+  st_table *field_table;
+  ID *ids;
+} Language;
+
 void init_tree();
+VALUE rb_new_language(TSLanguage *ts_language);
+Language *rb_tree_language_(VALUE self);

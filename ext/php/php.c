@@ -1,7 +1,10 @@
 #include "ruby.h"
+#include "tree_sitter/api.h"
 
 extern const void *tree_sitter_php(void);
 extern void require_core(void);
+extern ID id___language__;
+extern VALUE rb_new_language(TSLanguage *ts_language);
 
 void Init_php()
 {
@@ -12,8 +15,8 @@ void Init_php()
 
   VALUE rb_cPhp = rb_define_class_under(mTreeSitter, "Php", cTree);
 
-  ID language_id = rb_intern("@__language__");
   VALUE rb_cPhp_s = rb_singleton_class(rb_cPhp);
-  VALUE rb_language_func = ULL2NUM((uintptr_t) tree_sitter_php);
-  rb_ivar_set(rb_cPhp, language_id, rb_language_func);
+  VALUE rb_language = rb_new_language((TSLanguage *)tree_sitter_php());
+
+  rb_ivar_set(rb_cPhp, id___language__, rb_language);
 }

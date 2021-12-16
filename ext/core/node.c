@@ -45,6 +45,10 @@ static const rb_data_type_t point_type = {
     .flags = RUBY_TYPED_FREE_IMMEDIATELY,
 };
 
+static Tree *
+node_get_tree(AstNode *node) {
+  return (Tree *) DATA_PTR(node->rb_tree);
+}
 
 VALUE
 rb_new_node(VALUE rb_tree, TSNode ts_node)
@@ -79,7 +83,10 @@ rb_node_type(VALUE self)
   AstNode *node;
   TypedData_Get_Struct(self, AstNode, &node_type, node);
 
-  return rb_str_new_cstr(ts_node_type(node->ts_node));
+  Language *language = rb_tree_language_(node->rb_tree);
+  return ID2SYM(language->ids[ts_node_symbol(node->ts_node)]);
+
+  // return rb_str_new_cstr(ts_node_type(node->ts_node));
 }
 
 static VALUE
@@ -508,6 +515,30 @@ rb_node_byte_range(VALUE self) {
   return rb_node_byte_range_(node->ts_node);
 }
 
+
+static VALUE
+rb_node_child_of(VALUE self, VALUE rb_ancestor_type) {
+  AstNode *node;
+  st_data_t symbol;
+
+  TypedData_Get_Struct(self, AstNode, &node_type, node);
+  Language *language = rb_tree_language_(node->rb_tree);
+
+  if(st_lookup(language->field_table, (st_data_t) SYM2ID(rb_ancestor_type), &symbol)) {
+    TSNode n = ts_node_parent(node->ts_node);
+    while(!ts_node_is_null(n)) {
+      if(ts_node_symbol(n) == (TSSymbol) symbol) {
+        return Qtrue;
+      }
+      n = ts_node_parent(n);
+    }
+    return Qfalse;
+  } else {
+    rb_raise(rb_eTreeSitterError, "invalid type");
+    return Qnil;
+  }
+}
+
 static VALUE
 rb_node_eq(VALUE self, VALUE rb_other) {
   AstNode *node;
@@ -566,6 +597,7 @@ void init_node()
   rb_define_method(rb_cNode, "==", rb_node_eq, 1);
   rb_define_method(rb_cNode, "hash", rb_node_hash, 0);
   rb_define_method(rb_cNode, "eql?", rb_node_eq, 1);
+  rb_define_method(rb_cNode, "child_of?", rb_node_child_of, 1);
 
   rb_cPoint = rb_define_class_under(rb_cNode, "Point", rb_cObject);
   rb_define_method(rb_cPoint, "row", rb_point_row, 0);
