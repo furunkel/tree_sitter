@@ -84,7 +84,7 @@ rb_node_type(VALUE self)
   TypedData_Get_Struct(self, AstNode, &node_type, node);
 
   Language *language = rb_tree_language_(node->rb_tree);
-  return ID2SYM(language->ids[ts_node_symbol(node->ts_node)]);
+  return ID2SYM(language->ts_symbol2id[ts_node_symbol(node->ts_node)]);
 
   // return rb_str_new_cstr(ts_node_type(node->ts_node));
 }
@@ -303,6 +303,27 @@ rb_node_child_at(VALUE self, VALUE child_index)
     TSNode child = ts_node_child(node->ts_node, i);
     return rb_new_node(node->rb_tree, child);
   }
+}
+
+static VALUE
+rb_node_child_by_field(VALUE self, VALUE rb_field) {
+  Check_Type(child_index, T_SYMBOL);
+
+  AstNode *node;
+  TypedData_Get_Struct(self, AstNode, &node_type, node);
+
+    ID id = SYM2ID(child_index);
+    st_data_t field_id;
+    if(st_lookup(language->ts_field_table, (st_data_t) id, &field_id)) {
+      TSNode child = ts_node_child_by_field_id(node->ts_node, field_id);
+      if(ts_node_is_null(child)) {
+        return Qnil;
+      } else {
+        return rb_new_node(node->rb_tree, child);
+      }
+    } else {
+      return Qnil;
+    }
 }
 
 /*
@@ -524,7 +545,7 @@ rb_node_child_of(VALUE self, VALUE rb_ancestor_type) {
   TypedData_Get_Struct(self, AstNode, &node_type, node);
   Language *language = rb_tree_language_(node->rb_tree);
 
-  if(st_lookup(language->field_table, (st_data_t) SYM2ID(rb_ancestor_type), &symbol)) {
+  if(st_lookup(language->ts_symbol_table, (st_data_t) SYM2ID(rb_ancestor_type), &symbol)) {
     TSNode n = ts_node_parent(node->ts_node);
     while(!ts_node_is_null(n)) {
       if(ts_node_symbol(n) == (TSSymbol) symbol) {
@@ -584,6 +605,7 @@ void init_node()
   rb_define_method(rb_cNode, "last_child", rb_node_last_child, 0);
   rb_define_method(rb_cNode, "last_named_child", rb_node_last_named_child, 0);
   rb_define_method(rb_cNode, "child_at", rb_node_child_at, 1);
+  rb_define_method(rb_cNode, "child_by_field", rb_node_child_by_field, 1);
   rb_define_method(rb_cNode, "named_child_at", rb_node_named_child_at, 1);
   rb_define_method(rb_cNode, "start_position", rb_node_start_point, 0);
   rb_define_method(rb_cNode, "end_position", rb_node_end_point, 0);

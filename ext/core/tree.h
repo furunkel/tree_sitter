@@ -16,8 +16,12 @@ typedef struct {
 
 typedef struct {
   TSLanguage *ts_language;
-  st_table *field_table;
-  ID *ids;
+
+  st_table *ts_symbol_table;
+  ID *ts_symbol2id;
+
+  st_table *ts_field_table;
+  ID *ts_field2id;
 } Language;
 
 void init_tree();

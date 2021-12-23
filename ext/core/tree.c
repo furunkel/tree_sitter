@@ -82,8 +82,10 @@ static void
 language_free(void* obj)
 {
   Language* language = (Language*)obj;
-  st_free_table(language->field_table);
-  xfree(language->ids);
+  st_free_table(language->ts_symbol_table);
+  st_free_table(language->ts_field_table);
+  xfree(language->ts_symbol2id);
+  xfree(language->ts_field2id);
   xfree(obj);
 }
 
@@ -112,15 +114,26 @@ rb_new_language(TSLanguage *ts_language)
   language->ts_language = ts_language;
 
   uint32_t symbol_count = ts_language_symbol_count(ts_language);
+  uint32_t field_count = ts_language_field_count(ts_language);
 
-  language->field_table = st_init_numtable();
-  language->ids = RB_ALLOC_N(ID, symbol_count);
+  language->ts_symbol_table = st_init_numtable();
+  language->ts_field_table = st_init_numtable();
+
+  language->ts_symbol2id = RB_ALLOC_N(ID, symbol_count);
+  language->ts_field2id = RB_ALLOC_N(ID, field_count);
 
   for(uint32_t i = 0; i < symbol_count; i++) {
     const char *symbol_name = ts_language_symbol_name(ts_language, (TSSymbol) i);
     ID symbol_id = rb_intern(symbol_name);
-    st_insert(language->field_table, (st_data_t) symbol_id, i);
-    language->ids[i] = symbol_id;
+    st_insert(language->ts_symbol_table, (st_data_t) symbol_id, i);
+    language->ts_symbol2id[i] = symbol_id;
+  }
+
+  for(uint32_t i = 0; i < field_count; i++) {
+    const char *field_name = ts_language_field_name(ts_language, (TSFieldId) i);
+    ID field_id = rb_intern(field_name);
+    st_insert(language->ts_field_table, (st_data_t) field_id, i);
+    language->ts_field2id[i] = field_id;
   }
 
   return TypedData_Wrap_Struct(rb_cLanguage, &language_type, language);
@@ -640,12 +653,14 @@ rb_tree_cursor_current_field_name(VALUE self)
 }
 
 static VALUE
-rb_tree_cursor_current_field_id(VALUE self)
+rb_tree_cursor_current_field(VALUE self)
 {
   TreeCursor* tree_cursor;
   TypedData_Get_Struct(self, TreeCursor, &tree_cursor_type, tree_cursor);
 
-  return INT2NUM(ts_tree_cursor_current_field_id(&tree_cursor->ts_tree_cursor));
+  Language *language = rb_tree_language_(tree_cursor->rb_tree);
+  TSFieldId field_id = ts_tree_cursor_current_field_id(&tree_cursor->ts_tree_cursor);
+  return ID2SYM(language->ts_field2id[field_id]);
 }
 
 static VALUE
@@ -711,7 +726,7 @@ init_tree()
   rb_define_method(
     rb_cTreeCursor, "current_field_name", rb_tree_cursor_current_field_name, 0);
   rb_define_method(
-    rb_cTreeCursor, "current_field_id", rb_tree_cursor_current_field_id, 0);
+    rb_cTreeCursor, "current_field", rb_tree_cursor_current_field, 0);
   rb_define_method(
     rb_cTreeCursor, "current_node", rb_tree_cursor_current_node, 0);
 
