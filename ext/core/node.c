@@ -306,6 +306,34 @@ rb_node_child_at(VALUE self, VALUE child_index)
 }
 
 static VALUE
+rb_node_field_p(VALUE self, VALUE rb_field) {
+  Check_Type(rb_field, T_SYMBOL);
+
+  AstNode *node;
+  TypedData_Get_Struct(self, AstNode, &node_type, node);
+
+  TSNode parent_node = ts_node_parent(node->ts_node);
+  if(ts_node_is_null(parent_node)) {
+    return Qfalse;
+  }
+
+  Language *language = rb_tree_language_(node->rb_tree);
+
+  ID id = SYM2ID(rb_field);
+  st_data_t field_id;
+  if(st_lookup(language->ts_field_table, (st_data_t) id, &field_id)) {
+    TSNode child = ts_node_child_by_field_id(parent_node, field_id);
+    if(ts_node_is_null(child)) {
+      return Qfalse;
+    } else {
+      return (child.id == node->ts_node.id) ? Qtrue : Qfalse;
+    }
+  } else {
+    return Qfalse;
+  }
+}
+
+static VALUE
 rb_node_child_by_field(VALUE self, VALUE rb_field) {
   Check_Type(rb_field, T_SYMBOL);
 
@@ -608,6 +636,7 @@ void init_node()
   rb_define_method(rb_cNode, "last_named_child", rb_node_last_named_child, 0);
   rb_define_method(rb_cNode, "child_at", rb_node_child_at, 1);
   rb_define_method(rb_cNode, "child_by_field", rb_node_child_by_field, 1);
+  rb_define_method(rb_cNode, "field?", rb_node_field_p, 1);
   rb_define_method(rb_cNode, "named_child_at", rb_node_named_child_at, 1);
   rb_define_method(rb_cNode, "start_position", rb_node_start_point, 0);
   rb_define_method(rb_cNode, "end_position", rb_node_end_point, 0);
