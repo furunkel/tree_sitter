@@ -307,23 +307,25 @@ rb_node_child_at(VALUE self, VALUE child_index)
 
 static VALUE
 rb_node_child_by_field(VALUE self, VALUE rb_field) {
-  Check_Type(child_index, T_SYMBOL);
+  Check_Type(rb_field, T_SYMBOL);
 
   AstNode *node;
   TypedData_Get_Struct(self, AstNode, &node_type, node);
 
-    ID id = SYM2ID(child_index);
-    st_data_t field_id;
-    if(st_lookup(language->ts_field_table, (st_data_t) id, &field_id)) {
-      TSNode child = ts_node_child_by_field_id(node->ts_node, field_id);
-      if(ts_node_is_null(child)) {
-        return Qnil;
-      } else {
-        return rb_new_node(node->rb_tree, child);
-      }
-    } else {
+  Language *language = rb_tree_language_(node->rb_tree);
+
+  ID id = SYM2ID(rb_field);
+  st_data_t field_id;
+  if(st_lookup(language->ts_field_table, (st_data_t) id, &field_id)) {
+    TSNode child = ts_node_child_by_field_id(node->ts_node, field_id);
+    if(ts_node_is_null(child)) {
       return Qnil;
+    } else {
+      return rb_new_node(node->rb_tree, child);
     }
+  } else {
+    return Qnil;
+  }
 }
 
 /*

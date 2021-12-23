@@ -130,7 +130,7 @@ rb_new_language(TSLanguage *ts_language)
   }
 
   for(uint32_t i = 0; i < field_count; i++) {
-    const char *field_name = ts_language_field_name(ts_language, (TSFieldId) i);
+    const char *field_name = ts_language_field_name_for_id(ts_language, (TSFieldId) i);
     ID field_id = rb_intern(field_name);
     st_insert(language->ts_field_table, (st_data_t) field_id, i);
     language->ts_field2id[i] = field_id;
