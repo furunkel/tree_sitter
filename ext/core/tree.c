@@ -488,6 +488,13 @@ rb_tree_find_common_parent(int argc, VALUE *argv, VALUE self) {
 
 static VALUE
 rb_tree_merge_(int argc, VALUE *argv, VALUE self) {
+
+  if(argc == 1) {
+    return argv[0];
+  } else if(argc == 0) {
+    return Qnil;
+  }
+
   // should fit on the stack?
   TSNode *nodes = ALLOCA_N(TSNode, argc);
   VALUE rb_tree = Qnil;
