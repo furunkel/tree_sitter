@@ -1,4 +1,5 @@
 #include "node.h"
+#include "tree_sitter/api.h"
 
 // #undef NDEBUG
 // #include <assert.h>
@@ -91,7 +92,6 @@ rb_node_type(VALUE self)
 
 static VALUE
 rb_new_point(TSPoint ts_point) {
-
   Point *point = RB_ALLOC(Point);
   point->ts_point = ts_point;
   return TypedData_Wrap_Struct(rb_cPoint, &point_type, point);
@@ -196,13 +196,13 @@ rb_node_parents(VALUE self)
 
   VALUE rb_ary = rb_ary_new_capa(3);
   const unsigned max_parents = 1024;
-
   TSNode parent = node->ts_node;
   for(unsigned i = 0; i < max_parents; i++) {
     parent = ts_node_parent(parent);
     if(ts_node_is_null(parent)) break;
     rb_ary_push(rb_ary, rb_new_node(node->rb_tree, parent));
   } 
+
   return rb_ary;
 }
 
@@ -301,12 +301,66 @@ rb_node_child_at(VALUE self, VALUE child_index)
     return Qnil;
   } else {
     TSNode child = ts_node_child(node->ts_node, i);
+    if(ts_node_is_null(child)) {
+      return Qnil;
+    }
     return rb_new_node(node->rb_tree, child);
   }
 }
 
 static VALUE
-rb_node_field_p(VALUE self, VALUE rb_field) {
+rb_node_has_ancestor_path(int argc, VALUE *argv, VALUE self) {
+
+  if(argc == 0) {
+    return Qtrue;
+  }
+
+  AstNode *node;
+  TypedData_Get_Struct(self, AstNode, &node_type, node);
+
+  Language *language = rb_tree_language_(node->rb_tree);
+
+  VALUE rb_retval = Qfalse;
+  Tree *tree = node_get_tree(node);
+
+  TSTreeCursor tree_cursor = ts_tree_cursor_new(ts_tree_root_node(tree->ts_tree));
+  // ts_tree_cursor_goto_first_child_for_byte(&tree_cursor,);
+
+  for(int i = 0; i < argc; i++) {
+    VALUE sym = argv[argc - i - 1];
+    ID id = SYM2ID(sym);
+    st_data_t table_val;
+    bool found = false;
+
+    if(st_lookup(language->ts_field_table, (st_data_t) id, &table_val)) {
+      if(ts_tree_cursor_current_field_id(&tree_cursor) == (TSFieldId) table_val) {
+        found = true;
+      } else {
+        goto done;
+      }
+    }
+
+    if(!ts_tree_cursor_goto_parent(&tree_cursor)) {
+      goto done;
+    }
+
+    if(!found && st_lookup(language->ts_symbol_table, (st_data_t) id, &table_val)) {
+      TSNode parent = ts_tree_cursor_current_node(&tree_cursor);
+      if(ts_node_symbol(parent) != (TSSymbol) table_val) {
+        goto done;
+      } 
+    } else {
+      goto done;
+    }
+}
+
+done:
+  ts_tree_cursor_delete(&tree_cursor);
+  return rb_retval; 
+}
+
+static VALUE
+rb_node_has_field_p(VALUE self, VALUE rb_field) {
   Check_Type(rb_field, T_SYMBOL);
 
   AstNode *node;
@@ -376,6 +430,9 @@ rb_node_named_child_at(VALUE self, VALUE child_index)
     return Qnil;
   } else {
     TSNode child = ts_node_named_child(node->ts_node, i);
+    if(ts_node_is_null(child)) {
+      return Qnil;
+    }
     return rb_new_node(node->rb_tree, child);
   }
 }
@@ -568,7 +625,7 @@ rb_node_byte_range(VALUE self) {
 
 
 static VALUE
-rb_node_child_of(VALUE self, VALUE rb_ancestor_type) {
+rb_node_descendant_of_type(VALUE self, VALUE rb_ancestor_type) {
   AstNode *node;
   st_data_t symbol;
 
@@ -576,12 +633,13 @@ rb_node_child_of(VALUE self, VALUE rb_ancestor_type) {
   Language *language = rb_tree_language_(node->rb_tree);
 
   if(st_lookup(language->ts_symbol_table, (st_data_t) SYM2ID(rb_ancestor_type), &symbol)) {
+    VALUE rb_retval = Qfalse;
     TSNode n = ts_node_parent(node->ts_node);
     while(!ts_node_is_null(n)) {
       if(ts_node_symbol(n) == (TSSymbol) symbol) {
         return Qtrue;
       }
-      n = ts_node_parent(n);
+      n = ts_node_parent(n);    
     }
     return Qfalse;
   } else {
@@ -636,7 +694,8 @@ void init_node()
   rb_define_method(rb_cNode, "last_named_child", rb_node_last_named_child, 0);
   rb_define_method(rb_cNode, "child_at", rb_node_child_at, 1);
   rb_define_method(rb_cNode, "child_by_field", rb_node_child_by_field, 1);
-  rb_define_method(rb_cNode, "field?", rb_node_field_p, 1);
+  rb_define_method(rb_cNode, "has_field?", rb_node_has_field_p, 1);
+  rb_define_method(rb_cNode, "has_ancestor_path?", rb_node_has_ancestor_path, -1);
   rb_define_method(rb_cNode, "named_child_at", rb_node_named_child_at, 1);
   rb_define_method(rb_cNode, "start_position", rb_node_start_point, 0);
   rb_define_method(rb_cNode, "end_position", rb_node_end_point, 0);
@@ -650,7 +709,7 @@ void init_node()
   rb_define_method(rb_cNode, "==", rb_node_eq, 1);
   rb_define_method(rb_cNode, "hash", rb_node_hash, 0);
   rb_define_method(rb_cNode, "eql?", rb_node_eq, 1);
-  rb_define_method(rb_cNode, "child_of?", rb_node_child_of, 1);
+  rb_define_method(rb_cNode, "descendant_of_type?", rb_node_descendant_of_type, 1);
 
   rb_cPoint = rb_define_class_under(rb_cNode, "Point", rb_cObject);
   rb_define_method(rb_cPoint, "row", rb_point_row, 0);
