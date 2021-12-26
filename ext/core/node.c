@@ -281,6 +281,25 @@ rb_node_last_named_child(VALUE self)
   }
 }
 
+static bool
+rb_node_child_at_(TSNode node, VALUE child_index, TSNode *child) {
+  int64_t i = (int64_t) FIX2INT(child_index);
+  int64_t child_count = (int64_t) ts_node_child_count(node);
+
+  if(i < 0) {
+    i += child_count;
+    if(i < 0) {
+      return false;
+    }
+  }
+  if (i > child_count) {
+    return false;
+  } else {
+    *child = ts_node_child(node, i);
+    return !ts_node_is_null(*child);
+  }
+}
+
 /*
  * Public: Return the child at the specified index.
  *
@@ -290,22 +309,65 @@ static VALUE
 rb_node_child_at(VALUE self, VALUE child_index)
 {
   Check_Type(child_index, T_FIXNUM);
-  uint32_t i = NUM2UINT(child_index);
 
   AstNode *node;
   TypedData_Get_Struct(self, AstNode, &node_type, node);
 
-  uint32_t child_count = ts_node_child_count(node->ts_node);
-
-  if (i > child_count) {
-    return Qnil;
-  } else {
-    TSNode child = ts_node_child(node->ts_node, i);
-    if(ts_node_is_null(child)) {
-      return Qnil;
-    }
+  TSNode child;
+  if(rb_node_child_at_(node->ts_node, child_index, &child)) {
     return rb_new_node(node->rb_tree, child);
+  } else {
+    return Qnil;
   }
+}
+
+
+static VALUE
+rb_node_dig(int argc, VALUE *argv, VALUE self) {
+  if(argc == 0) {
+    return self;
+  }
+
+  AstNode *node;
+  TypedData_Get_Struct(self, AstNode, &node_type, node);
+
+  Language *language = rb_tree_language_(node->rb_tree);
+
+  TSNode n = node->ts_node;
+
+  for(int i = 0; i < argc; i++) {
+    VALUE rb_index_or_field = argv[i];
+    switch(rb_type(rb_index_or_field)) {
+      case RUBY_T_SYMBOL: {
+        st_data_t table_val;
+        ID id = RB_SYM2ID(rb_index_or_field);
+        if(st_lookup(language->ts_field_table, (st_data_t) id, &table_val)) {
+          TSNode child = ts_node_child_by_field_id(n, (TSFieldId) table_val);
+          if(ts_node_is_null(child)) {
+            return Qnil;
+          } else {
+            n = child;
+          }
+        } else {
+          return Qnil;  
+        }
+        break;
+      }
+      case RUBY_T_FIXNUM:
+        TSNode child;
+        if(rb_node_child_at_(n, rb_index_or_field, &child)) {
+          n = child;
+        } else {
+          return Qnil;
+        }
+        break;
+      default: {
+        rb_raise(rb_eArgError, "expected integer or symbol");
+        return Qnil;
+      }
+    }
+  }
+  return rb_new_node(node->rb_tree, n);
 }
 
 static VALUE
@@ -419,12 +481,19 @@ static VALUE
 rb_node_named_child_at(VALUE self, VALUE child_index)
 {
   Check_Type(child_index, T_FIXNUM);
-  uint32_t i = NUM2UINT(child_index);
+  int64_t i = FIX2INT(child_index);
 
   AstNode *node;
   TypedData_Get_Struct(self, AstNode, &node_type, node);
 
-  uint32_t child_count = ts_node_named_child_count(node->ts_node);
+  int64_t child_count = ts_node_named_child_count(node->ts_node);
+
+  if(i < 0) {
+    i += child_count;
+    if(i < 0) {
+      return Qnil;
+    }
+  }
 
   if (i > child_count) {
     return Qnil;
@@ -633,7 +702,6 @@ rb_node_descendant_of_type(VALUE self, VALUE rb_ancestor_type) {
   Language *language = rb_tree_language_(node->rb_tree);
 
   if(st_lookup(language->ts_symbol_table, (st_data_t) SYM2ID(rb_ancestor_type), &symbol)) {
-    VALUE rb_retval = Qfalse;
     TSNode n = ts_node_parent(node->ts_node);
     while(!ts_node_is_null(n)) {
       if(ts_node_symbol(n) == (TSSymbol) symbol) {
@@ -693,6 +761,7 @@ void init_node()
   rb_define_method(rb_cNode, "last_child", rb_node_last_child, 0);
   rb_define_method(rb_cNode, "last_named_child", rb_node_last_named_child, 0);
   rb_define_method(rb_cNode, "child_at", rb_node_child_at, 1);
+  rb_define_method(rb_cNode, "dig", rb_node_dig, -1);
   rb_define_method(rb_cNode, "child_by_field", rb_node_child_by_field, 1);
   rb_define_method(rb_cNode, "has_field?", rb_node_has_field_p, 1);
   rb_define_method(rb_cNode, "has_ancestor_path?", rb_node_has_ancestor_path, -1);
