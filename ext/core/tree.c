@@ -89,48 +89,48 @@ language_free(void* obj)
   xfree(obj);
 }
 
-#define TS_NODE_ARRAY_EMBED_LEN 64
+// #define TS_NODE_ARRAY_EMBED_LEN 64
 
-typedef struct {
-  TSNode *data;
-  TSNode embed_data[TS_NODE_ARRAY_EMBED_LEN];
-  uint32_t len;
-  uint32_t capa;
-} TSNodeArray;
+// typedef struct {
+//   TSNode *data;
+//   TSNode embed_data[TS_NODE_ARRAY_EMBED_LEN];
+//   uint32_t len;
+//   uint32_t capa;
+// } TSNodeArray;
 
-static void
-ts_node_array_init(TSNodeArray *array) {
-  array->data = array->embed_data;
-  array->len = 0;
-  array->capa = TS_NODE_ARRAY_EMBED_LEN;
-}
+// static void
+// ts_node_array_init(TSNodeArray *array) {
+//   array->data = array->embed_data;
+//   array->len = 0;
+//   array->capa = TS_NODE_ARRAY_EMBED_LEN;
+// }
 
-static void
-ts_node_array_destroy(TSNodeArray *array) {
-  if(array->data != array->embed_data) {
-    xfree(array->data);
-  }
-}
+// static void
+// ts_node_array_destroy(TSNodeArray *array) {
+//   if(array->data != array->embed_data) {
+//     xfree(array->data);
+//   }
+// }
 
-static void
-ts_node_array_clear(TSNodeArray *array) {
-  array->len = 0;
-}
+// static void
+// ts_node_array_clear(TSNodeArray *array) {
+//   array->len = 0;
+// }
 
-static void
-ts_node_array_push(TSNodeArray *array, TSNode node) {
-  if(array->len == array->capa) {
-    uint32_t new_capa = array->capa * 2;
-    if(array->data == array->embed_data) {
-      array->data = RB_ALLOC_N(TSNode, new_capa);
-      MEMCPY(array->data, array->embed_data, TSNode, array->len);
-    } else {
-      RB_REALLOC_N(array->data, TSNode, new_capa);
-    }
-  } else {
-    array->data[array->len++] = node;
-  }
-}
+// static void
+// ts_node_array_push(TSNodeArray *array, TSNode node) {
+//   if(array->len == array->capa) {
+//     uint32_t new_capa = array->capa * 2;
+//     if(array->data == array->embed_data) {
+//       array->data = RB_ALLOC_N(TSNode, new_capa);
+//       MEMCPY(array->data, array->embed_data, TSNode, array->len);
+//     } else {
+//       RB_REALLOC_N(array->data, TSNode, new_capa);
+//     }
+//   } else {
+//     array->data[array->len++] = node;
+//   }
+// }
 
 
 /*static void
@@ -205,6 +205,7 @@ rb_tree_language(VALUE self)
 {
   Tree* tree;
   TypedData_Get_Struct(self, Tree, &tree_type, tree);
+  (void) tree;
 
   VALUE rb_klass = rb_class_of(self);
   VALUE rb_language = rb_ivar_get(rb_klass, id___language__);
@@ -597,7 +598,6 @@ rb_tree_merge(int argc, VALUE *argv, VALUE self) {
 static TSNode
 find_node_by_byte(VALUE rb_tree, Language *language, TSNode node, uint32_t goal_byte,
                   bool include_parents, bool include_fields, bool parent_types, VALUE *rb_path) {
-  TSNode found_node;
   TSTreeCursor tree_cursor = ts_tree_cursor_new(node);
   VALUE rb_path_ = Qnil;
 
@@ -663,9 +663,12 @@ rb_tree_find_by_byte(VALUE self, VALUE rb_goal_byte, VALUE rb_parents, VALUE rb_
     return Qnil;
   }
 
+  bool return_array = false;
+
   if(RB_TYPE_P(rb_goal_byte, T_ARRAY)) {
     rb_goal_bytes = RARRAY_PTR(rb_goal_byte);
     goal_bytes_len = RARRAY_LEN(rb_goal_byte);
+    return_array = true;
   } else {
     Check_Type(rb_goal_byte, T_FIXNUM);
     rb_goal_bytes = &rb_goal_byte;
@@ -705,11 +708,10 @@ rb_tree_find_by_byte(VALUE self, VALUE rb_goal_byte, VALUE rb_parents, VALUE rb_
     TSNode node = find_node_by_byte(self, language, root_node, goal_byte, include_parents, include_fields, parent_types, &rb_node_or_path);
     if(!include_parents) {
       VALUE rb_node = rb_new_node(self, node);
-      rb_ary_push(rb_retval, rb_node);
       rb_node_or_path = rb_node;
     }
 
-    if(goal_bytes_len == 1) {
+    if(!return_array) {
       rb_retval = rb_node_or_path;
     } else {
       rb_ary_push(rb_retval, rb_node_or_path);
