@@ -595,18 +595,28 @@ rb_tree_merge(int argc, VALUE *argv, VALUE self) {
 }
 
 static TSNode
-find_node_by_byte(TSNode node, uint32_t goal_byte, TSNodeArray *node_array) {
+find_node_by_byte(VALUE rb_tree, Language *language, TSNode node, uint32_t goal_byte,
+                  bool include_parents, bool include_fields, VALUE *rb_path) {
   int64_t ret;
   TSNode found_node;
   TSTreeCursor tree_cursor = ts_tree_cursor_new(node);
+  VALUE rb_path_;
 
-  if(node_array != NULL) {
-    ts_node_array_push(node_array, node);
+  if(include_parents) {
+    rb_path_ = rb_ary_new();
+    rb_ary_push(rb_path_, rb_new_node(rb_tree, node));
+    *rb_path = rb_path_;
   }
 
   while((ret = ts_tree_cursor_goto_first_child_for_byte(&tree_cursor, goal_byte)) != -1) {
-    if(node_array != NULL) {
-      ts_node_array_push(node_array, ts_tree_cursor_current_node(&tree_cursor));
+    if(include_parents) {
+      if(include_fields) {
+        TSFieldId field_id = ts_tree_cursor_current_field_id(&tree_cursor);
+        if(field_id != 0) {
+          rb_ary_push(rb_path_, RB_ID2SYM(language->ts_field2id[field_id]));
+        }
+      }
+      rb_ary_push(rb_path_, rb_new_node(rb_tree, ts_tree_cursor_current_node(&tree_cursor)));
     }
   }
   found_node = ts_tree_cursor_current_node(&tree_cursor);
@@ -615,13 +625,19 @@ find_node_by_byte(TSNode node, uint32_t goal_byte, TSNodeArray *node_array) {
 }
 
 static VALUE
-rb_tree_find_by_byte(VALUE self, VALUE rb_goal_byte, VALUE rb_parents) {
+rb_tree_find_by_byte(VALUE self, VALUE rb_goal_byte, VALUE rb_parents, VALUE rb_fields) {
   Tree* tree;
   TypedData_Get_Struct(self, Tree, &tree_type, tree);
 
   VALUE *rb_goal_bytes;
   size_t goal_bytes_len;
   bool include_parents = RTEST(rb_parents);
+  bool include_fields = RTEST(rb_fields);
+
+  if(include_fields && !include_parents) {
+    rb_raise(rb_eArgError, "fields can only be returned together with parents");
+    return Qnil;
+  }
 
   if(RB_TYPE_P(rb_goal_byte, T_ARRAY)) {
     rb_goal_bytes = RARRAY_PTR(rb_goal_byte);
@@ -642,12 +658,9 @@ rb_tree_find_by_byte(VALUE self, VALUE rb_goal_byte, VALUE rb_parents) {
     rb_retval = rb_ary_new_capa(goal_bytes_len);
   }
 
-  VALUE rb_prev_node_or_path;
-  TSNodeArray node_array;
+  Language *language = rb_tree_language_(self);
 
-  if(include_parents) {
-    ts_node_array_init(&node_array);
-  }
+  VALUE rb_prev_node_or_path;
 
   for(size_t i = 0; i < goal_bytes_len; i++) {
     uint32_t goal_byte = (uint32_t) FIX2UINT(rb_goal_bytes[i]);
@@ -664,17 +677,9 @@ rb_tree_find_by_byte(VALUE self, VALUE rb_goal_byte, VALUE rb_parents) {
       }
     }
 
-    ts_node_array_clear(&node_array);
-    TSNode node = find_node_by_byte(root_node, goal_byte, include_parents ? &node_array : NULL);
     VALUE rb_node_or_path;
-
-    if(include_parents) {
-      VALUE rb_path = rb_ary_new_capa(node_array.len);
-      for(size_t i = 0; i < node_array.len; i++) {
-        rb_ary_push(rb_path, rb_new_node(self, node_array.data[i]));
-      }
-      rb_node_or_path = rb_path;
-    } else {
+    TSNode node = find_node_by_byte(self, language, root_node, goal_byte, include_parents, include_fields, &rb_node_or_path);
+    if(!include_parents) {
       VALUE rb_node = rb_new_node(self, node);
       rb_ary_push(rb_retval, rb_node);
       rb_node_or_path = rb_node;
@@ -687,10 +692,6 @@ rb_tree_find_by_byte(VALUE self, VALUE rb_goal_byte, VALUE rb_parents) {
       rb_prev_node_or_path = rb_node_or_path;
       prev_node = node;
     }
-  }
-
-  if(include_parents) {
-    ts_node_array_destroy(&node_array);
   }
 
   return rb_retval;
@@ -776,7 +777,7 @@ init_tree()
   rb_define_method(rb_cTree, "root_node", rb_tree_root_node, 0);
   rb_define_method(rb_cTree, "language", rb_tree_language, 0);
 
-  rb_define_method(rb_cTree, "__find_by_byte__", rb_tree_find_by_byte, 2);
+  rb_define_method(rb_cTree, "__find_by_byte__", rb_tree_find_by_byte, 3);
   rb_define_private_method(rb_cTree, "__to_h__", rb_tree_to_h, 0);
   rb_define_singleton_method(rb_cTree, "merge", rb_tree_merge, -1);
   rb_define_singleton_method(rb_cTree, "find_common_parent", rb_tree_find_common_parent, -1);
