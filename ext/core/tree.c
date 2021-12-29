@@ -608,7 +608,7 @@ find_node_by_byte(VALUE rb_tree, Language *language, TSNode node, uint32_t goal_
     // } else {
     //   rb_ary_push(rb_path_, rb_new_node(rb_tree, node));
     // }
-    // *rb_path = rb_path_;
+    *rb_path = rb_path_;
   }
 
   TSNode current_node = node;
@@ -684,7 +684,7 @@ rb_tree_find_by_byte(VALUE self, VALUE rb_goal_byte, VALUE rb_parents, VALUE rb_
 
   Language *language = rb_tree_language_(self);
 
-  VALUE rb_prev_node_or_path;
+  // VALUE rb_prev_node_or_path;
 
   for(size_t i = 0; i < goal_bytes_len; i++) {
     uint32_t goal_byte = (uint32_t) FIX2UINT(rb_goal_bytes[i]);
@@ -713,7 +713,7 @@ rb_tree_find_by_byte(VALUE self, VALUE rb_goal_byte, VALUE rb_parents, VALUE rb_
       rb_retval = rb_node_or_path;
     } else {
       rb_ary_push(rb_retval, rb_node_or_path);
-      rb_prev_node_or_path = rb_node_or_path;
+      // rb_prev_node_or_path = rb_node_or_path;
       prev_node = node;
     }
   }
