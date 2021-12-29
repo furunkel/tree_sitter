@@ -596,36 +596,59 @@ rb_tree_merge(int argc, VALUE *argv, VALUE self) {
 
 static TSNode
 find_node_by_byte(VALUE rb_tree, Language *language, TSNode node, uint32_t goal_byte,
-                  bool include_parents, bool include_fields, VALUE *rb_path) {
-  int64_t ret;
+                  bool include_parents, bool include_fields, bool parent_types, VALUE *rb_path) {
   TSNode found_node;
   TSTreeCursor tree_cursor = ts_tree_cursor_new(node);
-  VALUE rb_path_;
+  VALUE rb_path_ = Qnil;
 
   if(include_parents) {
     rb_path_ = rb_ary_new();
-    rb_ary_push(rb_path_, rb_new_node(rb_tree, node));
-    *rb_path = rb_path_;
+    // if(parent_types) {
+    //   rb_ary_push(rb_path_, RB_ID2SYM(language->ts_symbol2id[ts_node_symbol(node)]));
+    // } else {
+    //   rb_ary_push(rb_path_, rb_new_node(rb_tree, node));
+    // }
+    // *rb_path = rb_path_;
   }
 
-  while((ret = ts_tree_cursor_goto_first_child_for_byte(&tree_cursor, goal_byte)) != -1) {
+  TSNode current_node = node;
+  TSFieldId current_field_id = 0;
+
+  while(true) {
+    int64_t ret = ts_tree_cursor_goto_first_child_for_byte(&tree_cursor, goal_byte);
+
     if(include_parents) {
       if(include_fields) {
-        TSFieldId field_id = ts_tree_cursor_current_field_id(&tree_cursor);
-        if(field_id != 0) {
-          rb_ary_push(rb_path_, RB_ID2SYM(language->ts_field2id[field_id]));
+        if(current_field_id != 0) {
+          rb_ary_push(rb_path_, RB_ID2SYM(language->ts_field2id[current_field_id]));
         }
       }
-      rb_ary_push(rb_path_, rb_new_node(rb_tree, ts_tree_cursor_current_node(&tree_cursor)));
+      // if ret == -1 we are at the goal node, so we want the node, not its type
+      if(parent_types && ret != -1) {
+        rb_ary_push(rb_path_, RB_ID2SYM(language->ts_symbol2id[ts_node_symbol(current_node)]));
+      } else {
+        rb_ary_push(rb_path_, rb_new_node(rb_tree, current_node));
+      }
     }
+
+    if(include_parents || ret == -1) {
+      if(include_fields) {
+        current_field_id = ts_tree_cursor_current_field_id(&tree_cursor);
+      }
+      current_node = ts_tree_cursor_current_node(&tree_cursor);
+    }
+
+    if(ret == -1) {
+      break;
+    } 
   }
-  found_node = ts_tree_cursor_current_node(&tree_cursor);
+
   ts_tree_cursor_delete(&tree_cursor);
-  return found_node;
+  return current_node;
 }
 
 static VALUE
-rb_tree_find_by_byte(VALUE self, VALUE rb_goal_byte, VALUE rb_parents, VALUE rb_fields) {
+rb_tree_find_by_byte(VALUE self, VALUE rb_goal_byte, VALUE rb_parents, VALUE rb_fields, VALUE rb_types) {
   Tree* tree;
   TypedData_Get_Struct(self, Tree, &tree_type, tree);
 
@@ -633,9 +656,10 @@ rb_tree_find_by_byte(VALUE self, VALUE rb_goal_byte, VALUE rb_parents, VALUE rb_
   size_t goal_bytes_len;
   bool include_parents = RTEST(rb_parents);
   bool include_fields = RTEST(rb_fields);
+  bool parent_types = RTEST(rb_types);
 
-  if(include_fields && !include_parents) {
-    rb_raise(rb_eArgError, "fields can only be returned together with parents");
+  if((include_fields || parent_types) && !include_parents) {
+    rb_raise(rb_eArgError, "fields or parent types can only be returned together with parents");
     return Qnil;
   }
 
@@ -677,8 +701,8 @@ rb_tree_find_by_byte(VALUE self, VALUE rb_goal_byte, VALUE rb_parents, VALUE rb_
       }
     }
 
-    VALUE rb_node_or_path;
-    TSNode node = find_node_by_byte(self, language, root_node, goal_byte, include_parents, include_fields, &rb_node_or_path);
+    VALUE rb_node_or_path = Qnil;
+    TSNode node = find_node_by_byte(self, language, root_node, goal_byte, include_parents, include_fields, parent_types, &rb_node_or_path);
     if(!include_parents) {
       VALUE rb_node = rb_new_node(self, node);
       rb_ary_push(rb_retval, rb_node);
@@ -777,7 +801,7 @@ init_tree()
   rb_define_method(rb_cTree, "root_node", rb_tree_root_node, 0);
   rb_define_method(rb_cTree, "language", rb_tree_language, 0);
 
-  rb_define_method(rb_cTree, "__find_by_byte__", rb_tree_find_by_byte, 3);
+  rb_define_method(rb_cTree, "__find_by_byte__", rb_tree_find_by_byte, 4);
   rb_define_private_method(rb_cTree, "__to_h__", rb_tree_to_h, 0);
   rb_define_singleton_method(rb_cTree, "merge", rb_tree_merge, -1);
   rb_define_singleton_method(rb_cTree, "find_common_parent", rb_tree_find_common_parent, -1);
