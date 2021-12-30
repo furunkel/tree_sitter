@@ -681,7 +681,7 @@ rb_tree_find_by_byte(VALUE self, VALUE rb_goal_byte, VALUE rb_parents, VALUE rb_
   // TSNode *found_nodes = ALLOCA_N(TSNode, goal_bytes_len);
 
   VALUE rb_retval = Qnil;
-  if(goal_bytes_len > 1) {
+  if(return_array) {
     rb_retval = rb_ary_new_capa(goal_bytes_len);
   }
 
