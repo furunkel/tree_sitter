@@ -91,6 +91,15 @@ rb_node_type(VALUE self)
 }
 
 static VALUE
+rb_node_tree(VALUE self)
+{
+  AstNode *node;
+  TypedData_Get_Struct(self, AstNode, &node_type, node);
+
+  return node->rb_tree;
+}
+
+static VALUE
 rb_new_point(TSPoint ts_point) {
   Point *point = RB_ALLOC(Point);
   point->ts_point = ts_point;
@@ -751,6 +760,7 @@ void init_node()
   rb_cNode = rb_define_class_under(rb_mTreeSitter, "Node", rb_cObject);
   rb_define_method(rb_cNode, "to_s", rb_node_to_s, 0);
   rb_define_method(rb_cNode, "type", rb_node_type, 0);
+  rb_define_method(rb_cNode, "tree", rb_node_tree, 0);
   rb_define_method(rb_cNode, "named?", rb_node_is_named, 0);
   rb_define_method(rb_cNode, "child_count", rb_node_child_count, 0);
   rb_define_method(rb_cNode, "named_child_count", rb_node_named_child_count, 0);
