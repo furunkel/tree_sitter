@@ -173,13 +173,14 @@ rb_new_language(TSLanguage *ts_language)
     language->ts_symbol2id[i] = symbol_id;
   }
 
-  for(uint32_t i = 0; i < field_count; i++) {
+  /* NOTE: for soem reason it's <= field_count */
+  for(uint32_t i = 0; i <= field_count; i++) {
     const char *field_name = ts_language_field_name_for_id(ts_language, (TSFieldId) i);
     if(field_name != NULL) {
       ID field_id = rb_intern(field_name);
       st_insert(language->ts_field_table, (st_data_t) field_id, i);
       language->ts_field2id[i] = field_id;
-    }
+    }  
   }
 
   return TypedData_Wrap_Struct(rb_cLanguage, &language_type, language);
@@ -620,7 +621,8 @@ find_node_by_byte(VALUE rb_tree, Language *language, TSNode node, uint32_t goal_
     if(include_parents) {
       if(include_fields) {
         if(current_field_id != 0) {
-          rb_ary_push(rb_path_, RB_ID2SYM(language->ts_field2id[current_field_id]));
+          VALUE rb_field = RB_ID2SYM(language->ts_field2id[current_field_id]);
+          rb_ary_push(rb_path_, rb_field);
         }
       }
       // if ret == -1 we are at the goal node, so we want the node, not its type
