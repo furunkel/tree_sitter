@@ -727,7 +727,7 @@ rb_node_text_p(VALUE self, VALUE rb_text)
   size_t text_len = RSTRING_LEN(rb_text);
 
   if(end_byte - start_byte != text_len) return Qfalse;
-  if(start_byte == end_byte) return text_len == 0;
+  if(start_byte == end_byte) return text_len == 0 ? Qtrue : Qfalse;
 
   const char *input = RSTRING_PTR(rb_input);
   size_t input_len = RSTRING_LEN(rb_input);
