@@ -191,6 +191,12 @@ static VALUE
 rb_tree_alloc(VALUE self)
 {
   Tree* tree = RB_ZALLOC(Tree);
+
+  VALUE rb_language = rb_ivar_get(self, id___language__);
+  Language* language;
+  TypedData_Get_Struct(rb_language, Language, &language_type, language);
+  tree->language = language;
+
   return TypedData_Wrap_Struct(self, &tree_type, tree);
 }
 
@@ -211,14 +217,6 @@ rb_tree_language(VALUE self)
   VALUE rb_klass = rb_class_of(self);
   VALUE rb_language = rb_ivar_get(rb_klass, id___language__);
   return rb_language;
-}
-
-Language *
-rb_tree_language_(VALUE self) {
-  VALUE rb_language = rb_tree_language(self);
-  Language* language;
-  TypedData_Get_Struct(rb_language, Language, &language_type, language);
-  return language;
 }
 
 /*
@@ -619,17 +617,11 @@ find_node_by_byte(VALUE rb_tree, Language *language, TSNode node, uint32_t goal_
     int64_t ret = ts_tree_cursor_goto_first_child_for_byte(&tree_cursor, goal_byte);
 
     if(include_parents) {
-      if(include_fields) {
-        if(current_field_id != 0) {
-          VALUE rb_field = RB_ID2SYM(language->ts_field2id[current_field_id]);
-          rb_ary_push(rb_path_, rb_field);
-        }
-      }
       // if ret == -1 we are at the goal node, so we want the node, not its type
       if(parent_types && ret != -1) {
         rb_ary_push(rb_path_, RB_ID2SYM(language->ts_symbol2id[ts_node_symbol(current_node)]));
       } else {
-        rb_ary_push(rb_path_, rb_new_node(rb_tree, current_node));
+        rb_ary_push(rb_path_, rb_new_node_with_field(rb_tree, current_node, current_field_id));
       }
     }
 

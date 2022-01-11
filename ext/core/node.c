@@ -60,6 +60,15 @@ rb_new_node(VALUE rb_tree, TSNode ts_node)
   return TypedData_Wrap_Struct(rb_cNode, &node_type, node);
 }
 
+VALUE
+rb_new_node_with_field(VALUE rb_tree, TSNode ts_node, TSFieldId field_id) {
+  AstNode *node = RB_ZALLOC(AstNode);
+  node->ts_node = ts_node;
+  node->rb_tree = rb_tree;
+  node->cached_field = field_id;
+  return TypedData_Wrap_Struct(rb_cNode, &node_type, node);
+}
+
 /*
  * Public: Render the node and its children as a string.
  *
@@ -449,18 +458,63 @@ done:
 }
 
 static VALUE
-rb_node_has_field_p(VALUE self, VALUE rb_field) {
-  Check_Type(rb_field, T_SYMBOL);
-
+rb_node_field(VALUE self) {
   AstNode *node;
   TypedData_Get_Struct(self, AstNode, &node_type, node);
+
+  Language *language = rb_tree_language_(node->rb_tree);
+
+  if(node->cached_field != 0) {
+    ID id = language->ts_field2id[node->cached_field];
+    return RB_ID2SYM(id);
+  }
+
+  TSNode parent_node = ts_node_parent(node->ts_node);
+  if(ts_node_is_null(parent_node)) {
+    return Qnil;
+  }
+
+  VALUE rb_retval = Qnil;
+
+  TSTreeCursor cursor = ts_tree_cursor_new(parent_node);
+  if(!ts_tree_cursor_goto_first_child(&cursor)) goto done;
+
+  while(ts_tree_cursor_goto_next_sibling(&cursor)) {
+    TSNode child_node = ts_tree_cursor_current_node(&cursor);
+    if(node->ts_node.id == child_node.id) {
+      TSFieldId field_id = ts_tree_cursor_current_field_id(&cursor);
+      if(field_id != 0) {
+        rb_retval = RB_ID2SYM(language->ts_field2id[field_id]);
+        goto done;
+      }
+    }
+  }
+
+done:
+  ts_tree_cursor_delete(&cursor);
+  return rb_retval;  
+}
+
+static VALUE
+rb_node_field_p(VALUE self, VALUE rb_field) {
+  AstNode *node;
+  TypedData_Get_Struct(self, AstNode, &node_type, node);
+
+  if(!RB_TYPE_P(rb_field, T_SYMBOL)) return Qfalse;
+
+  Language *language = rb_tree_language_(node->rb_tree);
+
+  if(node->cached_field != 0) {
+    ID id = language->ts_field2id[node->cached_field];
+    ID field_id = RB_SYM2ID(rb_field);
+    return id == field_id ? Qtrue : Qfalse;
+  }
 
   TSNode parent_node = ts_node_parent(node->ts_node);
   if(ts_node_is_null(parent_node)) {
     return Qfalse;
   }
 
-  Language *language = rb_tree_language_(node->rb_tree);
 
   ID id = SYM2ID(rb_field);
   st_data_t field_id;
@@ -827,7 +881,8 @@ void init_node()
   rb_define_method(rb_cNode, "child_at", rb_node_child_at, 1);
   rb_define_method(rb_cNode, "dig", rb_node_dig, -1);
   rb_define_method(rb_cNode, "child_by_field", rb_node_child_by_field, 1);
-  rb_define_method(rb_cNode, "has_field?", rb_node_has_field_p, 1);
+  rb_define_method(rb_cNode, "field?", rb_node_field_p, 1);
+  rb_define_method(rb_cNode, "field", rb_node_field, 0);
   rb_define_method(rb_cNode, "has_ancestor_path?", rb_node_has_ancestor_path, -1);
   rb_define_method(rb_cNode, "named_child_at", rb_node_named_child_at, 1);
   rb_define_method(rb_cNode, "start_position", rb_node_start_point, 0);
