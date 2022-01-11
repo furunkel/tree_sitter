@@ -164,7 +164,7 @@ rb_new_language(TSLanguage *ts_language)
   language->ts_field_table = st_init_numtable();
 
   language->ts_symbol2id = RB_ALLOC_N(ID, symbol_count);
-  language->ts_field2id = RB_ALLOC_N(ID, field_count);
+  language->ts_field2id = RB_ALLOC_N(ID, field_count + 1);
 
   for(uint32_t i = 0; i < symbol_count; i++) {
     const char *symbol_name = ts_language_symbol_name(ts_language, (TSSymbol) i);

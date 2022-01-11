@@ -91,16 +91,21 @@ rb_node_type(VALUE self)
 }
 
 static VALUE
-rb_node_type_p(VALUE self, VALUE rb_type)
+rb_node_type_p(int argc, VALUE *argv, VALUE self)
 {
   AstNode *node;
   TypedData_Get_Struct(self, AstNode, &node_type, node);
   Language *language = rb_tree_language_(node->rb_tree);
 
-  ID id = SYM2ID(rb_type);
-  ID node_id = language->ts_symbol2id[ts_node_symbol(node->ts_node)];
+  for(int i = 0; i < argc; i++) {
+    if(RB_TYPE_P(argv[i], T_SYMBOL)) {
+      ID id = SYM2ID(argv[i]);
+      ID node_id = language->ts_symbol2id[ts_node_symbol(node->ts_node)];
+      if(id == node_id) return Qtrue;
+    }
+  }
 
-  return id == node_id ? Qtrue : Qfalse;
+  return Qfalse;
 }
 
 static VALUE
@@ -840,7 +845,7 @@ void init_node()
   rb_define_method(rb_cNode, "descendant_of_type?", rb_node_descendant_of_type, 1);
 
   rb_define_method(rb_cNode, "text?", rb_node_text_p, 1);
-  rb_define_method(rb_cNode, "type?", rb_node_type_p, 1);
+  rb_define_method(rb_cNode, "type?", rb_node_type_p, -1);
 
   rb_cPoint = rb_define_class_under(rb_cNode, "Point", rb_cObject);
   rb_define_method(rb_cPoint, "row", rb_point_row, 0);
