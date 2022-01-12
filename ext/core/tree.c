@@ -276,7 +276,7 @@ rb_tree_root_node(VALUE self)
 }
 
 static VALUE
-node_to_hash(TSNode node, Tree* tree, const char* field_name)
+node_to_hash(TSTreeCursor *cursor, TSNode node, Tree* tree)
 {
   VALUE rb_hash = rb_hash_new();
 
@@ -288,25 +288,10 @@ node_to_hash(TSNode node, Tree* tree, const char* field_name)
     rb_type = Qnil;
   }
 
-  uint32_t child_count = ts_node_child_count(node);
+  rb_hash_aset(rb_hash, RB_ID2SYM(id_type), rb_type);
+
   uint32_t named_child_count = ts_node_named_child_count(node);
   VALUE rb_children = Qnil;
-  if (named_child_count > 0) {
-    rb_children = rb_ary_new_capa(child_count);
-
-    for (uint32_t i = 0; i < child_count; i++) {
-      TSNode child_node = ts_node_child(node, i);
-      if (!ts_node_is_named(child_node))
-        continue;
-
-      const char* child_field_name = ts_node_field_name_for_child(node, i);
-      VALUE rb_child_hash = node_to_hash(child_node, tree, child_field_name);
-      rb_ary_push(rb_children, rb_child_hash);
-    }
-  }
-
-  rb_hash_aset(rb_hash, RB_ID2SYM(id_type), rb_type);
-  rb_hash_aset(rb_hash, RB_ID2SYM(id_children), rb_children);
 
   if (named_child_count == 0 && tree->rb_input != Qnil) {
     VALUE rb_text = rb_node_text_(node, tree->rb_input);
@@ -316,10 +301,28 @@ node_to_hash(TSNode node, Tree* tree, const char* field_name)
     rb_hash_aset(rb_hash, RB_ID2SYM(id_byte_range), rb_byte_range);
   }
 
+  const char *field_name = ts_tree_cursor_current_field_name(cursor);
   if (field_name) {
     VALUE rb_field_name = rb_str_new_cstr(field_name);
     rb_hash_aset(rb_hash, RB_ID2SYM(id_field), rb_field_name);
   }
+
+  if (named_child_count > 0) {
+    rb_children = rb_ary_new_capa(named_child_count);
+    if(ts_tree_cursor_goto_first_child(cursor)) {
+      do {
+        TSNode child_node = ts_tree_cursor_current_node(cursor);
+        TSTreeCursor child_cursor = ts_tree_cursor_copy(cursor);
+        if(ts_node_is_named(child_node)) {
+          VALUE rb_child_hash = node_to_hash(&child_cursor, child_node, tree);
+          rb_ary_push(rb_children, rb_child_hash);
+        }
+        ts_tree_cursor_delete(&child_cursor);
+      } while(ts_tree_cursor_goto_next_sibling(cursor));
+    }
+  }
+
+  rb_hash_aset(rb_hash, RB_ID2SYM(id_children), rb_children);
 
   return rb_hash;
 }
@@ -331,7 +334,12 @@ rb_tree_to_h(VALUE self)
 
   TypedData_Get_Struct(self, Tree, &tree_type, tree);
   TSNode root_node = ts_tree_root_node(tree->ts_tree);
-  return node_to_hash(root_node, tree, NULL);
+  TSTreeCursor cursor = ts_tree_cursor_new(root_node);
+
+  VALUE rb_hash = node_to_hash(&cursor, root_node, tree);
+
+  ts_tree_cursor_delete(&cursor);
+  return rb_hash;
 }
 
 
