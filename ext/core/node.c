@@ -767,7 +767,7 @@ rb_node_text(VALUE self)
 }
 
 static VALUE
-rb_node_text_p(VALUE self, VALUE rb_text)
+rb_node_text_p(int argc, VALUE *argv, VALUE self)
 {
   AstNode *node;
   TypedData_Get_Struct(self, AstNode, &node_type, node);
@@ -775,24 +775,32 @@ rb_node_text_p(VALUE self, VALUE rb_text)
   Tree *tree;
   TypedData_Get_Struct(node->rb_tree, Tree, &tree_type, tree);
 
-  Check_Type(rb_text, T_STRING);
-
   rb_tree_check_attached(tree);
   VALUE rb_input = tree->rb_input;
 
   TSNode ts_node = node->ts_node;
   uint32_t start_byte = ts_node_start_byte(ts_node);
   uint32_t end_byte = ts_node_end_byte(ts_node);
-  size_t text_len = RSTRING_LEN(rb_text);
 
-  if(end_byte - start_byte != text_len) return Qfalse;
-  if(start_byte == end_byte) return text_len == 0 ? Qtrue : Qfalse;
+  for(int i = 0; i < argc; i++) {
+    VALUE rb_text = argv[i];
+    if(rb_type(rb_text) == T_STRING) {
+      size_t text_len = RSTRING_LEN(rb_text);
 
-  const char *input = RSTRING_PTR(rb_input);
-  size_t input_len = RSTRING_LEN(rb_input);
+      if(end_byte - start_byte != text_len) continue;
+      if(start_byte == end_byte && text_len == 0) return Qtrue;
 
-  rb_node_check_input_range(start_byte, end_byte, input_len);
-  return rb_memcmp(input + start_byte, RSTRING_PTR(rb_text), end_byte - start_byte) == 0 ? Qtrue : Qfalse;
+      const char *input = RSTRING_PTR(rb_input);
+      size_t input_len = RSTRING_LEN(rb_input);
+
+      rb_node_check_input_range(start_byte, end_byte, input_len);
+      if(!rb_memcmp(input + start_byte, RSTRING_PTR(rb_text), end_byte - start_byte)) {
+        return Qtrue;
+      }
+    }
+  }
+
+  return Qfalse;
 }
 
 VALUE
@@ -899,7 +907,7 @@ void init_node()
   rb_define_method(rb_cNode, "eql?", rb_node_eq, 1);
   rb_define_method(rb_cNode, "descendant_of_type?", rb_node_descendant_of_type, 1);
 
-  rb_define_method(rb_cNode, "text?", rb_node_text_p, 1);
+  rb_define_method(rb_cNode, "text?", rb_node_text_p, -1);
   rb_define_method(rb_cNode, "type?", rb_node_type_p, -1);
 
   rb_cPoint = rb_define_class_under(rb_cNode, "Point", rb_cObject);
