@@ -13,6 +13,8 @@ static ID id_attach;
 static ID id_field;
 static ID id_text;
 static ID id_whitespace;
+
+ID id_error;
 ID id___language__;
 
 #ifndef MAX
@@ -168,9 +170,11 @@ rb_new_language(TSLanguage *ts_language)
 
   for(uint32_t i = 0; i < symbol_count; i++) {
     const char *symbol_name = ts_language_symbol_name(ts_language, (TSSymbol) i);
-    ID symbol_id = rb_intern(symbol_name);
-    st_insert(language->ts_symbol_table, (st_data_t) symbol_id, i);
-    language->ts_symbol2id[i] = symbol_id;
+    if(symbol_name != NULL) {
+      ID symbol_id = rb_intern(symbol_name);
+      st_insert(language->ts_symbol_table, (st_data_t) symbol_id, i);
+      language->ts_symbol2id[i] = symbol_id;
+    }
   }
 
   /* NOTE: for soem reason it's <= field_count */
@@ -611,7 +615,7 @@ find_node_by_byte(VALUE rb_tree, Language *language, TSNode node, uint32_t goal_
   if(include_parents) {
     rb_path_ = rb_ary_new();
     // if(parent_types) {
-    //   rb_ary_push(rb_path_, RB_ID2SYM(language->ts_symbol2id[ts_node_symbol(node)]));
+    //   rb_ary_push(rb_path_, RB_ID2SYM(language_symbol2id(language, ts_node_symbol(node))));
     // } else {
     //   rb_ary_push(rb_path_, rb_new_node(rb_tree, node));
     // }
@@ -627,7 +631,7 @@ find_node_by_byte(VALUE rb_tree, Language *language, TSNode node, uint32_t goal_
     if(include_parents) {
       // if ret == -1 we are at the goal node, so we want the node, not its type
       if(parent_types && ret != -1) {
-        rb_ary_push(rb_path_, RB_ID2SYM(language->ts_symbol2id[ts_node_symbol(current_node)]));
+        rb_ary_push(rb_path_, RB_ID2SYM(language_symbol2id(language, ts_node_symbol(current_node))));
       } else {
         rb_ary_push(rb_path_, rb_new_node_with_field(rb_tree, current_node, current_field_id));
       }
@@ -766,7 +770,7 @@ rb_tree_cursor_current_field(VALUE self)
 
   Language *language = rb_tree_language_(tree_cursor->rb_tree);
   TSFieldId field_id = ts_tree_cursor_current_field_id(&tree_cursor->ts_tree_cursor);
-  return ID2SYM(language->ts_field2id[field_id]);
+  return ID2SYM(language_field2id(language, field_id));
 }
 
 static VALUE
@@ -794,6 +798,7 @@ init_tree()
   id_text = rb_intern("text");
   id_whitespace = rb_intern("whitespace");
   id___language__ = rb_intern("@__language__");
+  id_error = rb_intern("error");
 
   VALUE rb_mTreeSitter = rb_define_module("TreeSitter");
 

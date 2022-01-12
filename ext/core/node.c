@@ -94,7 +94,8 @@ rb_node_type(VALUE self)
   TypedData_Get_Struct(self, AstNode, &node_type, node);
 
   Language *language = rb_tree_language_(node->rb_tree);
-  return ID2SYM(language->ts_symbol2id[ts_node_symbol(node->ts_node)]);
+  VALUE rb_type = RB_ID2SYM(language_symbol2id(language, ts_node_symbol(node->ts_node)));
+  return rb_type;
 
   // return rb_str_new_cstr(ts_node_type(node->ts_node));
 }
@@ -109,7 +110,7 @@ rb_node_type_p(int argc, VALUE *argv, VALUE self)
   for(int i = 0; i < argc; i++) {
     if(RB_TYPE_P(argv[i], T_SYMBOL)) {
       ID id = SYM2ID(argv[i]);
-      ID node_id = language->ts_symbol2id[ts_node_symbol(node->ts_node)];
+      ID node_id = language_symbol2id(language, ts_node_symbol(node->ts_node));
       if(id == node_id) return Qtrue;
     }
   }
@@ -465,7 +466,7 @@ rb_node_field(VALUE self) {
   Language *language = rb_tree_language_(node->rb_tree);
 
   if(node->cached_field != 0) {
-    ID id = language->ts_field2id[node->cached_field];
+    ID id = language_field2id(language, node->cached_field);
     return RB_ID2SYM(id);
   }
 
@@ -484,7 +485,7 @@ rb_node_field(VALUE self) {
     if(node->ts_node.id == child_node.id) {
       TSFieldId field_id = ts_tree_cursor_current_field_id(&cursor);
       if(field_id != 0) {
-        rb_retval = RB_ID2SYM(language->ts_field2id[field_id]);
+        rb_retval = RB_ID2SYM(language_field2id(language, field_id));
         goto done;
       }
     }
@@ -505,7 +506,7 @@ rb_node_field_p(VALUE self, VALUE rb_field) {
   Language *language = rb_tree_language_(node->rb_tree);
 
   if(node->cached_field != 0) {
-    ID id = language->ts_field2id[node->cached_field];
+    ID id = language_field2id(language, node->cached_field);
     ID field_id = RB_SYM2ID(rb_field);
     return id == field_id ? Qtrue : Qfalse;
   }
@@ -741,13 +742,13 @@ rb_node_check_input_range(uint32_t start_byte, uint32_t end_byte, size_t input_l
 VALUE rb_node_text_(TSNode ts_node, VALUE rb_input) {
   uint32_t start_byte = ts_node_start_byte(ts_node);
   uint32_t end_byte = ts_node_end_byte(ts_node);
-  const char *input = RSTRING_PTR(rb_input);
-
-  size_t input_len = RSTRING_LEN(rb_input);
 
   if(start_byte == end_byte) {
     return Qnil;
   }
+
+  const char *input = RSTRING_PTR(rb_input);
+  size_t input_len = RSTRING_LEN(rb_input);
 
   rb_node_check_input_range(start_byte, end_byte, input_len);
   return rb_str_new(input + start_byte, end_byte - start_byte);
@@ -763,7 +764,10 @@ rb_node_text(VALUE self)
   TypedData_Get_Struct(node->rb_tree, Tree, &tree_type, tree);
 
   rb_tree_check_attached(tree);
-  return rb_node_text_(node->ts_node, tree->rb_input);
+  VALUE rb_text = rb_node_text_(node->ts_node, tree->rb_input);
+  RB_GC_GUARD(rb_text);
+
+  return rb_text;
 }
 
 static VALUE
