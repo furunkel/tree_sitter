@@ -5,14 +5,9 @@ static VALUE rb_cTree;
 static VALUE rb_cTreeCursor;
 static VALUE rb_cLanguage;
 
-static ID id_type;
 static ID id_types;
-static ID id_byte_range;
-static ID id_children;
-static ID id_attach;
-static ID id_field;
-static ID id_text;
 static ID id_whitespace;
+static ID id_attach;
 
 ID id_error;
 ID id___language__;
@@ -278,74 +273,6 @@ rb_tree_root_node(VALUE self)
   TSNode ts_node = ts_tree_root_node(tree->ts_tree);
   return rb_new_node(self, ts_node);
 }
-
-static VALUE
-node_to_hash(TSTreeCursor *cursor, TSNode node, Tree* tree)
-{
-  VALUE rb_hash = rb_hash_new();
-
-  const char* type = ts_node_type(node);
-  VALUE rb_type;
-  if (type != NULL) {
-    rb_type = rb_str_new2(type);
-  } else {
-    rb_type = Qnil;
-  }
-
-  rb_hash_aset(rb_hash, RB_ID2SYM(id_type), rb_type);
-
-  uint32_t named_child_count = ts_node_named_child_count(node);
-  VALUE rb_children = Qnil;
-
-  if (named_child_count == 0 && tree->rb_input != Qnil) {
-    VALUE rb_text = rb_node_text_(node, tree->rb_input);
-    rb_hash_aset(rb_hash, RB_ID2SYM(id_text), rb_text);
-  } else {
-    VALUE rb_byte_range = rb_node_byte_range_(node);
-    rb_hash_aset(rb_hash, RB_ID2SYM(id_byte_range), rb_byte_range);
-  }
-
-  const char *field_name = ts_tree_cursor_current_field_name(cursor);
-  if (field_name) {
-    VALUE rb_field_name = rb_str_new_cstr(field_name);
-    rb_hash_aset(rb_hash, RB_ID2SYM(id_field), rb_field_name);
-  }
-
-  if (named_child_count > 0) {
-    rb_children = rb_ary_new_capa(named_child_count);
-    if(ts_tree_cursor_goto_first_child(cursor)) {
-      do {
-        TSNode child_node = ts_tree_cursor_current_node(cursor);
-        TSTreeCursor child_cursor = ts_tree_cursor_copy(cursor);
-        if(ts_node_is_named(child_node)) {
-          VALUE rb_child_hash = node_to_hash(&child_cursor, child_node, tree);
-          rb_ary_push(rb_children, rb_child_hash);
-        }
-        ts_tree_cursor_delete(&child_cursor);
-      } while(ts_tree_cursor_goto_next_sibling(cursor));
-    }
-  }
-
-  rb_hash_aset(rb_hash, RB_ID2SYM(id_children), rb_children);
-
-  return rb_hash;
-}
-
-static VALUE
-rb_tree_to_h(VALUE self)
-{
-  Tree* tree;
-
-  TypedData_Get_Struct(self, Tree, &tree_type, tree);
-  TSNode root_node = ts_tree_root_node(tree->ts_tree);
-  TSTreeCursor cursor = ts_tree_cursor_new(root_node);
-
-  VALUE rb_hash = node_to_hash(&cursor, root_node, tree);
-
-  ts_tree_cursor_delete(&cursor);
-  return rb_hash;
-}
-
 
 static VALUE
 rb_tree_copy(VALUE self)
@@ -789,13 +716,8 @@ void
 init_tree()
 {
 
-  id_type = rb_intern("type");
   id_types = rb_intern("types");
-  id_byte_range = rb_intern("byte_range");
-  id_children = rb_intern("children");
   id_attach = rb_intern("attach");
-  id_field = rb_intern("field");
-  id_text = rb_intern("text");
   id_whitespace = rb_intern("whitespace");
   id___language__ = rb_intern("@__language__");
   id_error = rb_intern("error");
@@ -811,7 +733,6 @@ init_tree()
   rb_define_method(rb_cTree, "language", rb_tree_language, 0);
 
   rb_define_method(rb_cTree, "__find_by_byte__", rb_tree_find_by_byte, 4);
-  rb_define_private_method(rb_cTree, "__to_h__", rb_tree_to_h, 0);
   rb_define_singleton_method(rb_cTree, "merge", rb_tree_merge, -1);
   rb_define_singleton_method(rb_cTree, "find_common_parent", rb_tree_find_common_parent, -1);
 

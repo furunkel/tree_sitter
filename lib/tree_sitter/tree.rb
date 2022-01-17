@@ -76,7 +76,7 @@ module TreeSitter
     end
 
     def to_h
-      __to_h__
+      root_node.to_h
     end
 
     def cursor

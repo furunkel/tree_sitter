@@ -13,6 +13,10 @@ module TreeSitter
       Tree::Cursor.new self
     end
 
+    def to_h
+      __to_h__
+    end
+
     def inspect
       text = self.text&.then { %(#{_1.inspect} )}
       "#<#{self.class}: #{text}#{type} (#{byte_range.inspect})>"
