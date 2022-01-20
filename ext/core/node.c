@@ -750,7 +750,7 @@ VALUE rb_node_text_(TSNode ts_node, VALUE rb_input) {
   uint32_t end_byte = ts_node_end_byte(ts_node);
 
   if(start_byte == end_byte) {
-    return Qnil;
+    return rb_str_new("", 0);
   }
 
   const char *input = RSTRING_PTR(rb_input);
@@ -771,7 +771,6 @@ rb_node_text(VALUE self)
 
   rb_tree_check_attached(tree);
   VALUE rb_text = rb_node_text_(node->ts_node, tree->rb_input);
-  RB_GC_GUARD(rb_text);
 
   return rb_text;
 }
@@ -825,6 +824,20 @@ rb_node_byte_range(VALUE self) {
   AstNode *node;
   TypedData_Get_Struct(self, AstNode, &node_type, node);
   return rb_node_byte_range_(node->ts_node);
+}
+
+static VALUE
+rb_node_start_byte(VALUE self) {
+  AstNode *node;
+  TypedData_Get_Struct(self, AstNode, &node_type, node);
+  return INT2FIX(ts_node_start_byte(node->ts_node));
+}
+
+static VALUE
+rb_node_end_byte(VALUE self) {
+  AstNode *node;
+  TypedData_Get_Struct(self, AstNode, &node_type, node);
+  return INT2FIX(ts_node_end_byte(node->ts_node));
 }
 
 
@@ -984,6 +997,8 @@ void init_node()
   rb_define_method(rb_cNode, "each_named_child", rb_node_each_named_child, 0);
   rb_define_method(rb_cNode, "text", rb_node_text, 0);
   rb_define_method(rb_cNode, "byte_range", rb_node_byte_range, 0);
+  rb_define_method(rb_cNode, "start_byte", rb_node_start_byte, 0);
+  rb_define_method(rb_cNode, "end_byte", rb_node_end_byte, 0);
   rb_define_method(rb_cNode, "==", rb_node_eq, 1);
   rb_define_method(rb_cNode, "hash", rb_node_hash, 0);
   rb_define_method(rb_cNode, "eql?", rb_node_eq, 1);

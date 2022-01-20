@@ -557,10 +557,14 @@ find_node_by_byte(VALUE rb_tree, Language *language, TSNode node, uint32_t goal_
 
     if(include_parents) {
       // if ret == -1 we are at the goal node, so we want the node, not its type
-      if(parent_types && ret != -1) {
-        rb_ary_push(rb_path_, RB_ID2SYM(language_symbol2id(language, ts_node_symbol(current_node))));
-      } else {
-        rb_ary_push(rb_path_, rb_new_node_with_field(rb_tree, current_node, current_field_id));
+      uint32_t start_byte = ts_node_start_byte(current_node);
+      uint32_t end_byte = ts_node_end_byte(current_node);
+      if(start_byte <= goal_byte && end_byte > goal_byte) {
+        if(parent_types && ret != -1) {
+          rb_ary_push(rb_path_, RB_ID2SYM(language_symbol2id(language, ts_node_symbol(current_node))));
+        } else {
+          rb_ary_push(rb_path_, rb_new_node_with_field(rb_tree, current_node, current_field_id));
+        }
       }
     }
 
