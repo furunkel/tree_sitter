@@ -503,36 +503,39 @@ done:
 }
 
 static VALUE
-rb_node_field_p(VALUE self, VALUE rb_field) {
+rb_node_field_p(int argc, VALUE *argv, VALUE self) {
   AstNode *node;
   TypedData_Get_Struct(self, AstNode, &node_type, node);
-
-  if(!RB_TYPE_P(rb_field, T_SYMBOL)) return Qfalse;
 
   Language *language = rb_tree_language_(node->rb_tree);
 
   if(node->cached_field != 0) {
-    ID id = language_field2id(language, node->cached_field);
-    ID field_id = RB_SYM2ID(rb_field);
-    return id == field_id ? Qtrue : Qfalse;
-  }
+    ID node_field_id = language_field2id(language, node->cached_field);
+    for(int i = 0; i < argc; i++) {
+      VALUE rb_field = argv[i];
+      if(!RB_TYPE_P(rb_field, T_SYMBOL)) continue;
 
-  TSNode parent_node = ts_node_parent(node->ts_node);
-  if(ts_node_is_null(parent_node)) {
-    return Qfalse;
-  }
-
-
-  ID id = SYM2ID(rb_field);
-  st_data_t field_id;
-  if(st_lookup(language->ts_field_table, (st_data_t) id, &field_id)) {
-    TSNode child = ts_node_child_by_field_id(parent_node, field_id);
-    if(ts_node_is_null(child)) {
-      return Qfalse;
-    } else {
-      return (child.id == node->ts_node.id) ? Qtrue : Qfalse;
+      ID field_id = SYM2ID(rb_field);
+      if(node_field_id == field_id) return Qtrue;
     }
+    return Qfalse;
   } else {
+    TSNode parent_node = ts_node_parent(node->ts_node);
+    if(ts_node_is_null(parent_node)) {
+      return Qfalse;
+    }
+
+    for(int i = 0; i < argc; i++) {
+      VALUE rb_field = argv[i];
+      if(!RB_TYPE_P(rb_field, T_SYMBOL)) continue;
+
+      ID field_id = SYM2ID(rb_field);
+      st_data_t ts_field_id;
+      if(st_lookup(language->ts_field_table, (st_data_t) field_id, &ts_field_id)) {
+        TSNode child = ts_node_child_by_field_id(parent_node, ts_field_id);
+        if(child.id == node->ts_node.id) return Qtrue;
+      }
+    }
     return Qfalse;
   }
 }
@@ -984,7 +987,7 @@ void init_node()
   rb_define_method(rb_cNode, "child_at", rb_node_child_at, 1);
   rb_define_method(rb_cNode, "dig", rb_node_dig, -1);
   rb_define_method(rb_cNode, "child_by_field", rb_node_child_by_field, 1);
-  rb_define_method(rb_cNode, "field?", rb_node_field_p, 1);
+  rb_define_method(rb_cNode, "field?", rb_node_field_p, -1);
   rb_define_method(rb_cNode, "field", rb_node_field, 0);
   rb_define_method(rb_cNode, "has_ancestor_path?", rb_node_has_ancestor_path, -1);
   rb_define_method(rb_cNode, "named_child_at", rb_node_named_child_at, 1);
