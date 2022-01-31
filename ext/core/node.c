@@ -586,15 +586,39 @@ rb_node_named_child_at(VALUE self, VALUE child_index)
     }
   }
 
-  if (i > child_count) {
+  if (i >= child_count) return Qnil;
+
+  TSNode child = ts_node_named_child(node->ts_node, i);
+  if(ts_node_is_null(child)) {
     return Qnil;
-  } else {
-    TSNode child = ts_node_named_child(node->ts_node, i);
-    if(ts_node_is_null(child)) {
-      return Qnil;
-    }
-    return rb_new_node(node->rb_tree, child);
   }
+  return rb_new_node(node->rb_tree, child);
+}
+
+static VALUE
+rb_node_named_child_at_p(VALUE self, VALUE child_index, VALUE rb_child)
+{
+  Check_Type(child_index, T_FIXNUM);
+  int64_t i = FIX2INT(child_index);
+
+  AstNode *node;
+  TypedData_Get_Struct(self, AstNode, &node_type, node);
+
+  AstNode *child_node;
+  TypedData_Get_Struct(rb_child, AstNode, &node_type, child_node);
+
+  int64_t child_count = ts_node_named_child_count(node->ts_node);
+
+  if(i < 0) {
+    i += child_count;
+    if(i < 0) {
+      return Qfalse;
+    }
+  }
+  if(i >= child_count) return Qfalse;
+
+  TSNode child = ts_node_named_child(node->ts_node, i);
+  return child_node->ts_node.id == child.id ? Qtrue : Qfalse;
 }
 
 /*
@@ -991,6 +1015,7 @@ void init_node()
   rb_define_method(rb_cNode, "field", rb_node_field, 0);
   rb_define_method(rb_cNode, "has_ancestor_path?", rb_node_has_ancestor_path, -1);
   rb_define_method(rb_cNode, "named_child_at", rb_node_named_child_at, 1);
+  rb_define_method(rb_cNode, "named_child_at?", rb_node_named_child_at_p, 2);
   rb_define_method(rb_cNode, "start_position", rb_node_start_point, 0);
   rb_define_method(rb_cNode, "end_position", rb_node_end_point, 0);
   rb_define_method(rb_cNode, "children", rb_node_children, 0);
