@@ -533,46 +533,70 @@ rb_tree_merge(int argc, VALUE *argv, VALUE self) {
   }
 }
 
-static TSNode
-find_node_by_byte(VALUE rb_tree, Language *language, TSNode node, uint32_t goal_byte,
-                  bool include_parents, bool include_fields, bool parent_types, VALUE *rb_path) {
+static void
+find_path_by_byte(VALUE rb_tree, Language *language, TSNode node, uint32_t goal_byte, VALUE rb_path) {
   TSTreeCursor tree_cursor = ts_tree_cursor_new(node);
-  VALUE rb_path_ = Qnil;
-
-  if(include_parents) {
-    rb_path_ = rb_ary_new();
-    // if(parent_types) {
-    //   rb_ary_push(rb_path_, RB_ID2SYM(language_symbol2id(language, ts_node_symbol(node))));
-    // } else {
-    //   rb_ary_push(rb_path_, rb_new_node(rb_tree, node));
-    // }
-    *rb_path = rb_path_;
-  }
-
   TSNode current_node = node;
   TSFieldId current_field_id = 0;
 
   while(true) {
     int64_t ret = ts_tree_cursor_goto_first_child_for_byte(&tree_cursor, goal_byte);
 
-    if(include_parents) {
-      // if ret == -1 we are at the goal node, so we want the node, not its type
-      uint32_t start_byte = ts_node_start_byte(current_node);
-      uint32_t end_byte = ts_node_end_byte(current_node);
-      if(start_byte <= goal_byte && end_byte > goal_byte) {
-        if(parent_types && ret != -1) {
-          rb_ary_push(rb_path_, RB_ID2SYM(language_symbol2id(language, ts_node_symbol(current_node))));
-        } else {
-          rb_ary_push(rb_path_, rb_new_node_with_field(rb_tree, current_node, current_field_id));
-        }
-      }
+    // if ret == -1 we are at the goal node, so we want the node, not its type
+    uint32_t start_byte = ts_node_start_byte(current_node);
+    uint32_t end_byte = ts_node_end_byte(current_node);
+    if(start_byte <= goal_byte && end_byte > goal_byte) {
+      rb_ary_push(rb_path, rb_new_node_with_field(rb_tree, current_node, current_field_id));
     }
 
-    if(include_parents || ret == -1) {
-      if(include_fields) {
-        current_field_id = ts_tree_cursor_current_field_id(&tree_cursor);
-      }
-      current_node = ts_tree_cursor_current_node(&tree_cursor);
+    current_field_id = ts_tree_cursor_current_field_id(&tree_cursor);
+    current_node = ts_tree_cursor_current_node(&tree_cursor);
+
+    if(ret == -1) {
+      break;
+    } 
+  }
+  ts_tree_cursor_delete(&tree_cursor);
+}
+
+static VALUE
+rb_tree_path_to(VALUE self, VALUE rb_goal_byte) {
+  Tree* tree;
+  TypedData_Get_Struct(self, Tree, &tree_type, tree);
+
+  TSNode root_node = ts_tree_root_node(tree->ts_tree);
+
+  VALUE rb_path = rb_ary_new();
+  Language *language = rb_tree_language_(self);
+
+  uint32_t goal_byte = (uint32_t) FIX2UINT(rb_goal_byte);
+  find_path_by_byte(self, language, root_node, goal_byte, rb_path);
+  return rb_path;
+}
+
+
+static TSNode
+find_node_by_byte(VALUE rb_tree, Language *language, TSNode node, uint32_t min_byte, uint32_t max_byte) {
+  TSTreeCursor tree_cursor = ts_tree_cursor_new(node);
+  TSNode found_node = {0, };
+
+  uint32_t mid_byte = max_byte / 2 + min_byte / 2;
+
+  fprintf(stderr, "MIN/MAX %d/%d => %d\n", min_byte, max_byte, mid_byte);
+
+  while(true) {
+    int64_t ret = ts_tree_cursor_goto_first_child_for_byte(&tree_cursor, mid_byte);
+    TSNode node = ts_tree_cursor_current_node(&tree_cursor);
+
+    uint32_t start_byte = ts_node_start_byte(node);
+    uint32_t end_byte = ts_node_end_byte(node);
+
+    fprintf(stderr, "START/END %s %d/%d\n", ts_node_type(node), start_byte, end_byte);
+
+    if(start_byte <= min_byte && end_byte > max_byte) {
+      found_node = node;
+    } else {
+      break;
     }
 
     if(ret == -1) {
@@ -581,83 +605,40 @@ find_node_by_byte(VALUE rb_tree, Language *language, TSNode node, uint32_t goal_
   }
 
   ts_tree_cursor_delete(&tree_cursor);
-  return current_node;
+  return found_node;
 }
 
 static VALUE
-rb_tree_find_by_byte(VALUE self, VALUE rb_goal_byte, VALUE rb_parents, VALUE rb_fields, VALUE rb_types) {
+rb_tree_find_by_byte(VALUE self, VALUE rb_goal_byte) {
   Tree* tree;
   TypedData_Get_Struct(self, Tree, &tree_type, tree);
 
-  VALUE *rb_goal_bytes;
-  size_t goal_bytes_len;
-  bool include_parents = RTEST(rb_parents);
-  bool include_fields = RTEST(rb_fields);
-  bool parent_types = RTEST(rb_types);
-
-  if((include_fields || parent_types) && !include_parents) {
-    rb_raise(rb_eArgError, "fields or parent types can only be returned together with parents");
-    return Qnil;
-  }
-
-  bool return_array = false;
+  uint32_t min_byte = UINT32_MAX;
+  uint32_t max_byte = 0;
 
   if(RB_TYPE_P(rb_goal_byte, T_ARRAY)) {
-    rb_goal_bytes = RARRAY_PTR(rb_goal_byte);
-    goal_bytes_len = RARRAY_LEN(rb_goal_byte);
-    return_array = true;
+    for(long int i = 0; i < RARRAY_LEN(rb_goal_byte); i++) {
+      VALUE rb_byte = RARRAY_AREF(rb_goal_byte, i);
+      uint32_t byte = (uint32_t) FIX2UINT(rb_byte);
+      min_byte = MIN(min_byte, byte);
+      max_byte = MAX(max_byte, byte);
+    }
   } else {
     Check_Type(rb_goal_byte, T_FIXNUM);
-    rb_goal_bytes = &rb_goal_byte;
-    goal_bytes_len = 1;
+    min_byte = (uint32_t) FIX2UINT(rb_goal_byte);
+    max_byte = min_byte;
   }
 
-  TSNode prev_node;
   TSNode root_node = ts_tree_root_node(tree->ts_tree);
-
-  // TSNode *found_nodes = ALLOCA_N(TSNode, goal_bytes_len);
-
-  VALUE rb_retval = Qnil;
-  if(return_array) {
-    rb_retval = rb_ary_new_capa(goal_bytes_len);
-  }
-
   Language *language = rb_tree_language_(self);
 
-  // VALUE rb_prev_node_or_path;
-
-  for(size_t i = 0; i < goal_bytes_len; i++) {
-    uint32_t goal_byte = (uint32_t) FIX2UINT(rb_goal_bytes[i]);
-
-    if(i > 0) {
-      uint32_t prev_start_byte = ts_node_start_byte(prev_node);
-      uint32_t prev_end_byte = ts_node_end_byte(prev_node);
-
-      // we only return leaf nodes, so this must be the same node or path
-      if(goal_byte >= prev_start_byte && goal_byte < prev_end_byte) {
-        // for now let's not output duplicates
-        // rb_ary_push(rb_retval, rb_prev_node_or_path);
-        continue;
-      }
-    }
-
-    VALUE rb_node_or_path = Qnil;
-    TSNode node = find_node_by_byte(self, language, root_node, goal_byte, include_parents, include_fields, parent_types, &rb_node_or_path);
-    if(!include_parents) {
-      VALUE rb_node = rb_new_node(self, node);
-      rb_node_or_path = rb_node;
-    }
-
-    if(!return_array) {
-      rb_retval = rb_node_or_path;
-    } else {
-      rb_ary_push(rb_retval, rb_node_or_path);
-      // rb_prev_node_or_path = rb_node_or_path;
-      prev_node = node;
-    }
+  TSNode node = find_node_by_byte(self, language, root_node, min_byte, max_byte);
+  if(ts_node_is_null(node)) {
+    return Qnil;
+  } else {
+    VALUE rb_node = rb_new_node(self, node);
+    return rb_node;
   }
-
-  return rb_retval;
 }
 
 static VALUE
@@ -736,7 +717,8 @@ init_tree()
   rb_define_method(rb_cTree, "root_node", rb_tree_root_node, 0);
   rb_define_method(rb_cTree, "language", rb_tree_language, 0);
 
-  rb_define_method(rb_cTree, "__find_by_byte__", rb_tree_find_by_byte, 4);
+  rb_define_method(rb_cTree, "__path_to__", rb_tree_path_to, 1);
+  rb_define_method(rb_cTree, "__find_by_byte__", rb_tree_find_by_byte, 1);
   rb_define_singleton_method(rb_cTree, "merge", rb_tree_merge, -1);
   rb_define_singleton_method(rb_cTree, "find_common_parent", rb_tree_find_common_parent, -1);
 

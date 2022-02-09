@@ -71,8 +71,12 @@ module TreeSitter
       end
     end
 
-    def find_by_byte(goal_byte, parents: false, fields: false, types: false)
-      __find_by_byte__ goal_byte, parents, fields, types
+    def find_by_byte(goal_byte)
+      __find_by_byte__ goal_byte
+    end
+
+    def path_to(goal_byte)
+      __path_to__ goal_byte
     end
 
     def to_h
