@@ -803,6 +803,32 @@ rb_node_text(VALUE self)
 }
 
 static VALUE
+rb_node_text_starts_with_p(VALUE self, VALUE rb_prefix) {
+
+  Check_Type(rb_prefix, T_STRING);
+
+  AstNode *node;
+  TypedData_Get_Struct(self, AstNode, &node_type, node);
+
+  Tree *tree;
+  TypedData_Get_Struct(node->rb_tree, Tree, &tree_type, tree);
+  rb_tree_check_attached(tree);
+
+  VALUE rb_input = tree->rb_input;
+  const char *input = RSTRING_PTR(rb_input);
+
+  uint32_t start_byte = ts_node_start_byte(node->ts_node);
+  uint32_t end_byte = ts_node_end_byte(node->ts_node);
+
+  long prefix_len = RSTRING_LEN(rb_prefix);
+
+  if(prefix_len > end_byte - start_byte) return Qfalse;
+  if(prefix_len == 0) return Qtrue;
+  if(!rb_memcmp(input + start_byte, RSTRING_PTR(rb_prefix), prefix_len)) return Qtrue;
+  return Qfalse;
+}
+
+static VALUE
 rb_node_text_p(int argc, VALUE *argv, VALUE self)
 {
   AstNode *node;
@@ -1024,6 +1050,7 @@ void init_node()
   rb_define_method(rb_cNode, "named_children", rb_node_named_children, 0);
   rb_define_method(rb_cNode, "each_named_child", rb_node_each_named_child, 0);
   rb_define_method(rb_cNode, "text", rb_node_text, 0);
+  rb_define_method(rb_cNode, "text_starts_with?", rb_node_text_starts_with_p, 1);
   rb_define_method(rb_cNode, "byte_range", rb_node_byte_range, 0);
   rb_define_method(rb_cNode, "start_byte", rb_node_start_byte, 0);
   rb_define_method(rb_cNode, "end_byte", rb_node_end_byte, 0);

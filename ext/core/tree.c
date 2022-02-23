@@ -534,27 +534,32 @@ rb_tree_merge(int argc, VALUE *argv, VALUE self) {
 }
 
 static void
-find_path_by_byte(VALUE rb_tree, Language *language, TSNode node, uint32_t goal_byte, VALUE rb_path) {
+find_path_by_byte(VALUE rb_tree, Language *language, TSNode node, uint32_t min_byte, uint32_t max_byte, VALUE rb_path) {
   TSTreeCursor tree_cursor = ts_tree_cursor_new(node);
   TSNode current_node = node;
   TSFieldId current_field_id = 0;
 
   while(true) {
-    int64_t ret = ts_tree_cursor_goto_first_child_for_byte(&tree_cursor, goal_byte);
+    uint32_t mid_byte = (uint32_t) (((uint64_t)max_byte + (uint64_t) min_byte) / 2);
+    int64_t ret = ts_tree_cursor_goto_first_child_for_byte(&tree_cursor, mid_byte);
 
     // if ret == -1 we are at the goal node, so we want the node, not its type
     uint32_t start_byte = ts_node_start_byte(current_node);
     uint32_t end_byte = ts_node_end_byte(current_node);
-    if(start_byte <= goal_byte && end_byte > goal_byte) {
+
+    // fprintf(stderr, "min/max byte: %d/%d/%d\n", min_byte, max_byte, mid_byte);
+    // fprintf(stderr, "start/end byte: %d/%d\n", start_byte, end_byte);
+
+    if(start_byte <= min_byte && end_byte > max_byte) {
       rb_ary_push(rb_path, rb_new_node_with_field(rb_tree, current_node, current_field_id));
     }
-
-    current_field_id = ts_tree_cursor_current_field_id(&tree_cursor);
-    current_node = ts_tree_cursor_current_node(&tree_cursor);
 
     if(ret == -1) {
       break;
     } 
+
+    current_field_id = ts_tree_cursor_current_field_id(&tree_cursor);
+    current_node = ts_tree_cursor_current_node(&tree_cursor);
   }
   ts_tree_cursor_delete(&tree_cursor);
 }
@@ -566,11 +571,26 @@ rb_tree_path_to(VALUE self, VALUE rb_goal_byte) {
 
   TSNode root_node = ts_tree_root_node(tree->ts_tree);
 
+  uint32_t min_byte = UINT32_MAX;
+  uint32_t max_byte = 0;
+
+  if(RB_TYPE_P(rb_goal_byte, T_ARRAY)) {
+    for(long int i = 0; i < RARRAY_LEN(rb_goal_byte); i++) {
+      VALUE rb_byte = RARRAY_AREF(rb_goal_byte, i);
+      uint32_t byte = (uint32_t) FIX2UINT(rb_byte);
+      min_byte = MIN(min_byte, byte);
+      max_byte = MAX(max_byte, byte);
+    }
+  } else {
+    min_byte = (uint32_t) FIX2UINT(rb_goal_byte);
+    max_byte = min_byte;
+  }
+
+
   VALUE rb_path = rb_ary_new();
   Language *language = rb_tree_language_(self);
 
-  uint32_t goal_byte = (uint32_t) FIX2UINT(rb_goal_byte);
-  find_path_by_byte(self, language, root_node, goal_byte, rb_path);
+  find_path_by_byte(self, language, root_node, min_byte, max_byte, rb_path);
   return rb_path;
 }
 
