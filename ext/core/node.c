@@ -530,8 +530,8 @@ rb_node_field_p(int argc, VALUE *argv, VALUE self) {
       if(!RB_TYPE_P(rb_field, T_SYMBOL)) continue;
 
       ID field_id = SYM2ID(rb_field);
-      st_data_t ts_field_id;
-      if(st_lookup(language->ts_field_table, (st_data_t) field_id, &ts_field_id)) {
+      TSFieldId ts_field_id;
+      if(language_id2field(language, field_id, &ts_field_id)) {
         TSNode child = ts_node_child_by_field_id(parent_node, ts_field_id);
         if(child.id == node->ts_node.id) return Qtrue;
       }
@@ -897,15 +897,15 @@ rb_node_end_byte(VALUE self) {
 static VALUE
 rb_node_descendant_of_type(VALUE self, VALUE rb_ancestor_type) {
   AstNode *node;
-  st_data_t symbol;
+  TSSymbol ts_symbol;
 
   TypedData_Get_Struct(self, AstNode, &node_type, node);
   Language *language = rb_tree_language_(node->rb_tree);
 
-  if(st_lookup(language->ts_symbol_table, (st_data_t) SYM2ID(rb_ancestor_type), &symbol)) {
+  if(language_id2symbol(language, SYM2ID(rb_ancestor_type), &ts_symbol)) {
     TSNode n = ts_node_parent(node->ts_node);
     while(!ts_node_is_null(n)) {
-      if(ts_node_symbol(n) == (TSSymbol) symbol) {
+      if(ts_node_symbol(n) == ts_symbol) {
         return Qtrue;
       }
       n = ts_node_parent(n);    

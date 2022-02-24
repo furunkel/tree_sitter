@@ -5,9 +5,10 @@
 #include "core.h"
 
 typedef struct {
+  uint16_t cached_field;
+  uint16_t index;
   VALUE rb_tree;
   TSNode ts_node;
-  uint16_t cached_field;
 } AstNode;
 
 typedef struct {

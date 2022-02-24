@@ -25,6 +25,17 @@ typedef struct {
   Language *language;
 } Tree;
 
+typedef struct {
+  TSNode ts_node;
+  TSFieldId field_id;
+} TreePathNode;
+
+typedef struct {
+  TreePathNode *nodes;
+  uint32_t len;
+  VALUE rb_tree;
+} TreePath;
+
 void init_tree();
 VALUE rb_new_language(TSLanguage *ts_language);
 
@@ -53,3 +64,6 @@ static inline ID
 language_field2id(Language *language, TSFieldId field_id) {
   return language->ts_field2id[field_id];
 }
+
+bool language_id2field(Language *language, ID id, TSFieldId *field_id);
+bool language_id2symbol(Language *language, ID id, TSSymbol *symbol);

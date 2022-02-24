@@ -4,6 +4,7 @@
 static VALUE rb_cTree;
 static VALUE rb_cTreeCursor;
 static VALUE rb_cLanguage;
+static VALUE rb_cTreePath;
 
 static ID id_types;
 static ID id_whitespace;
@@ -68,6 +69,33 @@ const rb_data_type_t tree_cursor_type = {
     .function = {
         .dmark = tree_cursor_mark,
         .dfree = tree_cursor_free,
+        .dsize = NULL,
+    },
+    .data = NULL,
+    .flags = RUBY_TYPED_FREE_IMMEDIATELY,
+};
+
+
+static void
+tree_path_free(void* obj)
+{
+  TreePath* tree_path = (TreePath*)obj;
+  xfree(tree_path->nodes);
+  xfree(obj);
+}
+
+static void
+tree_path_mark(void* obj)
+{
+  TreePath* tree_path = (TreePath *)obj;
+  rb_gc_mark(tree_path->rb_tree);
+}
+
+const rb_data_type_t tree_path_type = {
+    .wrap_struct_name = "Tree::Path",
+    .function = {
+        .dmark = tree_path_mark,
+        .dfree = tree_path_free,
         .dsize = NULL,
     },
     .data = NULL,
@@ -185,6 +213,23 @@ rb_new_language(TSLanguage *ts_language)
   return TypedData_Wrap_Struct(rb_cLanguage, &language_type, language);
 }
 
+bool language_id2field(Language *language, ID id, TSFieldId *field_id) {
+  st_data_t ts_field_id;
+  if(st_lookup(language->ts_field_table, (st_data_t) id, &ts_field_id)) {
+    *field_id = (TSFieldId) ts_field_id;
+    return true;
+  }
+  return false;
+}
+
+bool language_id2symbol(Language *language, ID id, TSSymbol *symbol) {
+  st_data_t ts_symbol;
+  if(st_lookup(language->ts_symbol_table, (st_data_t) id, &ts_symbol)) {
+    *symbol = (TSSymbol) ts_symbol;
+    return true;
+  }
+  return false;
+}
 
 static VALUE
 rb_tree_alloc(VALUE self)
@@ -204,6 +249,16 @@ rb_tree_cursor_alloc(VALUE self)
 {
   TreeCursor* tree_cursor = RB_ZALLOC(TreeCursor);
   return TypedData_Wrap_Struct(self, &tree_cursor_type, tree_cursor);
+}
+
+static VALUE
+rb_new_tree_path(VALUE rb_tree, TreePathNode *nodes, size_t len)
+{
+  TreePath* tree_path = RB_ZALLOC(TreePath);
+  tree_path->rb_tree = rb_tree;
+  tree_path->nodes = nodes;
+  tree_path->len = len;
+  return TypedData_Wrap_Struct(rb_cTreePath, &tree_path_type, tree_path);
 }
 
 static VALUE
@@ -534,10 +589,14 @@ rb_tree_merge(int argc, VALUE *argv, VALUE self) {
 }
 
 static void
-find_path_by_byte(VALUE rb_tree, Language *language, TSNode node, uint32_t min_byte, uint32_t max_byte, VALUE rb_path) {
+find_path_by_byte(VALUE rb_tree, Language *language, TSNode node, uint32_t min_byte, uint32_t max_byte, TreePathNode **nodes_out, size_t *nodes_len_out) {
   TSTreeCursor tree_cursor = ts_tree_cursor_new(node);
   TSNode current_node = node;
   TSFieldId current_field_id = 0;
+
+  size_t nodes_capa = 16;
+  size_t nodes_len = 0;
+  TreePathNode *nodes = RB_ALLOC_N(TreePathNode, nodes_capa);
 
   while(true) {
     uint32_t mid_byte = (uint32_t) (((uint64_t)max_byte + (uint64_t) min_byte) / 2);
@@ -551,7 +610,17 @@ find_path_by_byte(VALUE rb_tree, Language *language, TSNode node, uint32_t min_b
     // fprintf(stderr, "start/end byte: %d/%d\n", start_byte, end_byte);
 
     if(start_byte <= min_byte && end_byte > max_byte) {
-      rb_ary_push(rb_path, rb_new_node_with_field(rb_tree, current_node, current_field_id));
+      if(nodes_len == nodes_capa) {
+        size_t new_capa = nodes_capa * 2;
+        RB_REALLOC_N(nodes, TreePathNode, new_capa);
+        nodes_capa = new_capa;
+      } else {
+        TreePathNode path_node = {
+          .ts_node = current_node,
+          .field_id = current_field_id
+        };
+        nodes[nodes_len++] = path_node;
+      }
     }
 
     if(ret == -1) {
@@ -562,6 +631,9 @@ find_path_by_byte(VALUE rb_tree, Language *language, TSNode node, uint32_t min_b
     current_node = ts_tree_cursor_current_node(&tree_cursor);
   }
   ts_tree_cursor_delete(&tree_cursor);
+
+  *nodes_out = nodes;
+  *nodes_len_out = nodes_len;
 }
 
 static VALUE
@@ -586,11 +658,13 @@ rb_tree_path_to(VALUE self, VALUE rb_goal_byte) {
     max_byte = min_byte;
   }
 
-
-  VALUE rb_path = rb_ary_new();
   Language *language = rb_tree_language_(self);
 
-  find_path_by_byte(self, language, root_node, min_byte, max_byte, rb_path);
+  size_t nodes_len;
+  TreePathNode *nodes;
+  find_path_by_byte(self, language, root_node, min_byte, max_byte, &nodes, &nodes_len);
+
+  VALUE rb_path = rb_new_tree_path(self, nodes, nodes_len);
   return rb_path;
 }
 
@@ -717,6 +791,113 @@ rb_tree_cursor_copy(VALUE self)
   return TypedData_Wrap_Struct(rb_cTreeCursor, &tree_cursor_type, clone);
 }
 
+static VALUE
+rb_tree_path_aref(VALUE self, VALUE rb_index)
+{
+  TreePath* tree_path;
+  TypedData_Get_Struct(self, TreePath, &tree_path_type, tree_path);
+
+  long index = FIX2LONG(rb_index);
+  if(index < 0) {
+    index = tree_path->len + index;
+  }
+  if(index < 0 || index >= tree_path->len) {
+    rb_raise(rb_eIndexError, "index %ld outside bounds: %d...%u", index, 0,  (unsigned) tree_path->len);
+    return Qnil;
+  }
+  TreePathNode path_node = tree_path->nodes[index];
+
+  /*TODO: add option to cache Ruby nodes */
+  return rb_new_node_with_field(tree_path->rb_tree, path_node.ts_node, path_node.field_id);
+}
+
+static VALUE
+rb_tree_path_index_by_field(VALUE self, VALUE rb_field)
+{
+  TreePath* tree_path;
+  TypedData_Get_Struct(self, TreePath, &tree_path_type, tree_path);
+
+  // AstNode* node;
+  // TypedData_Get_Struct(rb_node, AstNode, &node_type, node);
+
+  Language *language = rb_tree_language_(tree_path->rb_tree);
+
+  ID field_id = SYM2ID(rb_field);
+  TSFieldId ts_field_id;
+  if(!language_id2field(language, field_id, &ts_field_id)) {
+    rb_raise(rb_eArgError, "unkown field");
+    return Qnil;
+  }
+
+  for(uint32_t i = 0; i < tree_path->len; i++) {
+    TreePathNode path_node = tree_path->nodes[i];
+    if(path_node.field_id == ts_field_id) {
+      return UINT2NUM(i);
+    }
+  }
+  return Qnil;
+}
+
+static VALUE
+rb_tree_path_index_by_type(VALUE self, VALUE rb_type)
+{
+  TreePath* tree_path;
+  TypedData_Get_Struct(self, TreePath, &tree_path_type, tree_path);
+
+  Language *language = rb_tree_language_(tree_path->rb_tree);
+
+  ID type_id = SYM2ID(rb_type);
+  TSSymbol ts_symbol;
+  if(!language_id2symbol(language, type_id, &ts_symbol)) {
+    rb_raise(rb_eArgError, "unkown field");
+    return Qnil;
+  }
+
+  for(uint32_t i = 0; i < tree_path->len; i++) {
+    TreePathNode path_node = tree_path->nodes[i];
+    if(ts_node_symbol(path_node.ts_node) == ts_symbol) {
+      return UINT2NUM(i);
+    }
+  }
+  return Qnil;
+}
+
+
+static VALUE
+rb_tree_path_size(VALUE self)
+{
+  TreePath* tree_path;
+  TypedData_Get_Struct(self, TreePath, &tree_path_type, tree_path);
+
+  return LONG2FIX((long) tree_path->len);
+}
+
+static VALUE
+tree_path_enum_length(VALUE rb_tree_path, VALUE args, VALUE eobj)
+{
+  TreePath* tree_path;
+  TypedData_Get_Struct(rb_tree_path, TreePath, &tree_path_type, tree_path);
+  return UINT2NUM(tree_path->len);
+}
+
+
+static VALUE
+rb_tree_path_each(VALUE self)
+{
+  TreePath* tree_path;
+  TypedData_Get_Struct(self, TreePath, &tree_path_type, tree_path);
+  RETURN_SIZED_ENUMERATOR(self, 0, 0, tree_path_enum_length);
+
+  for(uint32_t i = 0; i < tree_path->len; i++) {
+    TreePathNode path_node = tree_path->nodes[i];
+
+    /* TODO: add option to cache Ruby nodes */
+    VALUE rb_node = rb_new_node_with_field(tree_path->rb_tree, path_node.ts_node, path_node.field_id);
+    rb_yield(rb_node);
+  }
+  return self;
+}
+
 void
 init_tree()
 {
@@ -774,4 +955,12 @@ init_tree()
     rb_cTreeCursor, "copy", rb_tree_cursor_copy, 0);
 
   rb_cLanguage = rb_define_class_under(rb_mTreeSitter, "Language", rb_cObject);
+
+  rb_cTreePath = rb_define_class_under(rb_cTree, "Path", rb_cObject);
+  rb_include_module(rb_cTreePath, rb_mEnumerable);
+  rb_define_method(rb_cTreePath, "[]", rb_tree_path_aref, 1);
+  rb_define_method(rb_cTreePath, "size", rb_tree_path_size, 0);
+  rb_define_method(rb_cTreePath, "each", rb_tree_path_each, 0);
+  rb_define_method(rb_cTreePath, "index_by_field", rb_tree_path_index_by_field, 1);
+
 }
