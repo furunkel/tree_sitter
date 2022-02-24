@@ -107,21 +107,28 @@ rb_node_type(VALUE self)
 }
 
 static VALUE
+rb_node_type_p_(AstNode *node, Language *language, int argc, VALUE *argv) {
+  for(int i = 0; i < argc; i++) {
+    Check_Type(argv[i], T_SYMBOL);
+    ID id = SYM2ID(argv[i]);
+    ID node_id = language_symbol2id(language, ts_node_symbol(node->ts_node));
+    if(id == node_id) return Qtrue;
+  }
+  return Qfalse;
+}
+
+static VALUE
 rb_node_type_p(int argc, VALUE *argv, VALUE self)
 {
   AstNode *node;
   TypedData_Get_Struct(self, AstNode, &node_type, node);
   Language *language = rb_tree_language_(node->rb_tree);
 
-  for(int i = 0; i < argc; i++) {
-    if(RB_TYPE_P(argv[i], T_SYMBOL)) {
-      ID id = SYM2ID(argv[i]);
-      ID node_id = language_symbol2id(language, ts_node_symbol(node->ts_node));
-      if(id == node_id) return Qtrue;
-    }
+  if(argc == 1 && RB_TYPE_P(argv[0], T_ARRAY)) {
+    return rb_node_type_p_(node, language, RARRAY_LEN(argv[0]), RARRAY_PTR(argv[0]));
+  } else {
+    return rb_node_type_p_(node, language, argc, argv);
   }
-
-  return Qfalse;
 }
 
 static VALUE
@@ -503,17 +510,12 @@ done:
 }
 
 static VALUE
-rb_node_field_p(int argc, VALUE *argv, VALUE self) {
-  AstNode *node;
-  TypedData_Get_Struct(self, AstNode, &node_type, node);
-
-  Language *language = rb_tree_language_(node->rb_tree);
-
+rb_node_field_p_(AstNode *node, Language *language, int argc, VALUE *argv) {
   if(node->cached_field != 0) {
     ID node_field_id = language_field2id(language, node->cached_field);
     for(int i = 0; i < argc; i++) {
       VALUE rb_field = argv[i];
-      if(!RB_TYPE_P(rb_field, T_SYMBOL)) continue;
+      Check_Type(rb_field, T_SYMBOL);
 
       ID field_id = SYM2ID(rb_field);
       if(node_field_id == field_id) return Qtrue;
@@ -527,7 +529,7 @@ rb_node_field_p(int argc, VALUE *argv, VALUE self) {
 
     for(int i = 0; i < argc; i++) {
       VALUE rb_field = argv[i];
-      if(!RB_TYPE_P(rb_field, T_SYMBOL)) continue;
+      Check_Type(rb_field, T_SYMBOL);
 
       ID field_id = SYM2ID(rb_field);
       TSFieldId ts_field_id;
@@ -537,6 +539,20 @@ rb_node_field_p(int argc, VALUE *argv, VALUE self) {
       }
     }
     return Qfalse;
+  }
+}
+
+static VALUE
+rb_node_field_p(int argc, VALUE *argv, VALUE self) {
+  AstNode *node;
+  TypedData_Get_Struct(self, AstNode, &node_type, node);
+
+  Language *language = rb_tree_language_(node->rb_tree);
+
+  if(argc == 1 && RB_TYPE_P(argv[0], T_ARRAY)) {
+    return rb_node_field_p_(node, language, RARRAY_LEN(argv[0]), RARRAY_PTR(argv[0]));
+  } else {
+    return rb_node_field_p_(node, language, argc, argv);
   }
 }
 
