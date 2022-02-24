@@ -792,6 +792,13 @@ rb_tree_cursor_copy(VALUE self)
 }
 
 static VALUE
+rb_tree_path_get_node(TreePath *tree_path, long index) {
+  TreePathNode path_node = tree_path->nodes[index];
+  /*TODO: add option to cache Ruby nodes */
+  return rb_new_node_with_field(tree_path->rb_tree, path_node.ts_node, path_node.field_id);
+}
+
+static VALUE
 rb_tree_path_aref(VALUE self, VALUE rb_index)
 {
   TreePath* tree_path;
@@ -805,10 +812,7 @@ rb_tree_path_aref(VALUE self, VALUE rb_index)
     rb_raise(rb_eIndexError, "index %ld outside bounds: %d...%u", index, 0,  (unsigned) tree_path->len);
     return Qnil;
   }
-  TreePathNode path_node = tree_path->nodes[index];
-
-  /*TODO: add option to cache Ruby nodes */
-  return rb_new_node_with_field(tree_path->rb_tree, path_node.ts_node, path_node.field_id);
+  return rb_tree_path_get_node(tree_path, index);
 }
 
 static VALUE
@@ -873,6 +877,24 @@ rb_tree_path_size(VALUE self)
 }
 
 static VALUE
+rb_tree_path_first(VALUE self)
+{
+  TreePath* tree_path;
+  TypedData_Get_Struct(self, TreePath, &tree_path_type, tree_path);
+
+  return rb_tree_path_get_node(tree_path, 0);
+}
+
+static VALUE
+rb_tree_path_last(VALUE self)
+{
+  TreePath* tree_path;
+  TypedData_Get_Struct(self, TreePath, &tree_path_type, tree_path);
+
+  return rb_tree_path_get_node(tree_path, tree_path->len - 1);
+}
+
+static VALUE
 tree_path_enum_length(VALUE rb_tree_path, VALUE args, VALUE eobj)
 {
   TreePath* tree_path;
@@ -889,10 +911,7 @@ rb_tree_path_each(VALUE self)
   RETURN_SIZED_ENUMERATOR(self, 0, 0, tree_path_enum_length);
 
   for(uint32_t i = 0; i < tree_path->len; i++) {
-    TreePathNode path_node = tree_path->nodes[i];
-
-    /* TODO: add option to cache Ruby nodes */
-    VALUE rb_node = rb_new_node_with_field(tree_path->rb_tree, path_node.ts_node, path_node.field_id);
+    VALUE rb_node = rb_tree_path_get_node(tree_path, i);
     rb_yield(rb_node);
   }
   return self;
@@ -901,7 +920,6 @@ rb_tree_path_each(VALUE self)
 void
 init_tree()
 {
-
   id_types = rb_intern("types");
   id_attach = rb_intern("attach");
   id_whitespace = rb_intern("whitespace");
@@ -962,5 +980,7 @@ init_tree()
   rb_define_method(rb_cTreePath, "size", rb_tree_path_size, 0);
   rb_define_method(rb_cTreePath, "each", rb_tree_path_each, 0);
   rb_define_method(rb_cTreePath, "index_by_field", rb_tree_path_index_by_field, 1);
+  rb_define_method(rb_cTreePath, "last", rb_tree_path_last, 0);
+  rb_define_method(rb_cTreePath, "first", rb_tree_path_first, 0);
 
 }
