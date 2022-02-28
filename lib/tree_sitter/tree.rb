@@ -87,5 +87,15 @@ module TreeSitter
       root_node.cursor
     end
 
+    class Path
+      def rindex_by_field(field, before: nil)
+        __rindex_by_field__ field, before
+      end
+
+      def rindex_by_type(type, before: nil)
+        __rindex_by_type__ type, before
+      end
+    end
+
   end
 end

@@ -21,6 +21,10 @@ ID id___language__;
 #define MIN(a,b) (((a)>(b))?(b):(a))
 #endif
 
+#ifndef CLAMP
+#define CLAMP(x, low, high)  (((x) > (high)) ? (high) : (((x) < (low)) ? (low) : (x)))
+#endif
+
 static void
 tree_free(void* obj)
 {
@@ -431,55 +435,6 @@ node_id_cmp(const void* a, const void* b)
   return diff;
 }
 
-static bool
-rb_tree_merge__(const TSNode *nodes, size_t len, TSNode *out_nodes, size_t *out_len) {
-  TSNode *parents = ALLOCA_N(TSNode, len);
-  bool change = false;
-  TSNode **parent_ptrs = ALLOCA_N(TSNode *, len);
-
-  for(size_t i = 0; i < len; i++) {
-    // if(ts_node_is_named(nodes[i])) {
-      parents[i] = ts_node_parent(nodes[i]);
-    // } else {
-    //   parents[i].id = 0;
-    // }
-    parent_ptrs[i] = &parents[i];
-  }
-
-  qsort(parent_ptrs, len, sizeof(TSNode *), node_id_cmp);
-
-  for(size_t i = 0; i < len; i++) {
-    TSNode *parent_ptr = parent_ptrs[i];
-    size_t parent_index = parent_ptr - parents;
-
-    /* unnamed child node - copy child */
-    // if(parent_ptr->id == 0) {
-    //   out_nodes[(*out_len)] = nodes[parent_index];
-    //   (*out_len)++;
-    // } else 
-    {
-      uint32_t j;
-      for(j = 1; i + j < len && parent_ptrs[i + j]->id == parent_ptr->id; j++) {}
-
-      //FIXME: use named child count?
-      // uint32_t child_count = ts_node_named_child_count(*parent_ptr);
-      uint32_t child_count = ts_node_child_count(*parent_ptr);
-
-      if(child_count > 1 && j >= child_count) {
-        out_nodes[(*out_len)] = *parent_ptr;
-        (*out_len)++;
-        i += j - 1;
-        change = true;
-      } else {
-        out_nodes[(*out_len)] = nodes[parent_index];
-        (*out_len)++;
-      }
-    }
-  }
-
-  return change;
-}
-
 static VALUE
 rb_tree_find_common_parent_(int argc, VALUE *argv, VALUE self) {
   // should fit on the stack?
@@ -527,66 +482,114 @@ rb_tree_find_common_parent(int argc, VALUE *argv, VALUE self) {
   }
 }
 
-static VALUE
-rb_tree_merge_(int argc, VALUE *argv, VALUE self) {
+// static bool
+// rb_tree_merge__(const TSNode *nodes, size_t len, TSNode *out_nodes, size_t *out_len) {
+//   TSNode *parents = ALLOCA_N(TSNode, len);
+//   bool change = false;
+//   TSNode **parent_ptrs = ALLOCA_N(TSNode *, len);
 
-  if(argc == 1) {
-    return argv[0];
-  } else if(argc == 0) {
-    return Qnil;
-  }
+//   for(size_t i = 0; i < len; i++) {
+//     // if(ts_node_is_named(nodes[i])) {
+//       parents[i] = ts_node_parent(nodes[i]);
+//     // } else {
+//     //   parents[i].id = 0;
+//     // }
+//     parent_ptrs[i] = &parents[i];
+//   }
 
-  // should fit on the stack?
-  TSNode *nodes = ALLOCA_N(TSNode, argc);
-  VALUE rb_tree = Qnil;
-  Tree *tree = NULL;
+//   qsort(parent_ptrs, len, sizeof(TSNode *), node_id_cmp);
 
-  for(int i = 0; i < argc; i++) {
-    VALUE rb_node = argv[i];
-    AstNode *node;
+//   for(size_t i = 0; i < len; i++) {
+//     TSNode *parent_ptr = parent_ptrs[i];
+//     size_t parent_index = parent_ptr - parents;
 
-    TypedData_Get_Struct(rb_node, AstNode, &node_type, node);
-    rb_tree = node->rb_tree;
-    Tree *tree_ = (Tree *) DATA_PTR(rb_tree);
-    if(tree != NULL && tree != tree_) {
-      rb_raise(rb_eTreeSitterError, "nodes belong to different trees");
-      return Qnil;
-    }
-    tree = tree_;
-    nodes[i] = node->ts_node;
-  }
+//     /* unnamed child node - copy child */
+//     // if(parent_ptr->id == 0) {
+//     //   out_nodes[(*out_len)] = nodes[parent_index];
+//     //   (*out_len)++;
+//     // } else 
+//     {
+//       uint32_t j;
+//       for(j = 1; i + j < len && parent_ptrs[i + j]->id == parent_ptr->id; j++) {}
 
-  size_t len = argc;
-  TSNode *out_nodes = ALLOCA_N(TSNode, argc);
+//       //FIXME: use named child count?
+//       // uint32_t child_count = ts_node_named_child_count(*parent_ptr);
+//       uint32_t child_count = ts_node_child_count(*parent_ptr);
 
-  int i = 0;
-redo:
-  size_t out_len = 0;
-  bool change = rb_tree_merge__(nodes, len, out_nodes, &out_len);
+//       if(child_count > 1 && j >= child_count) {
+//         out_nodes[(*out_len)] = *parent_ptr;
+//         (*out_len)++;
+//         i += j - 1;
+//         change = true;
+//       } else {
+//         out_nodes[(*out_len)] = nodes[parent_index];
+//         (*out_len)++;
+//       }
+//     }
+//   }
 
-  if(change && i++ < 20) {
-    TSNode *tmp = nodes;
-    nodes = out_nodes;
-    out_nodes = tmp;
-    len = out_len;
-    goto redo;
-  }
+//   return change;
+// }
 
-  VALUE rb_ary = rb_ary_new_capa(out_len);
-  for(size_t i = 0; i < out_len; i++) {
-    rb_ary_push(rb_ary, rb_new_node(rb_tree, out_nodes[i]));
-  }
-  return rb_ary;
-}
+// static VALUE
+// rb_tree_merge_(int argc, VALUE *argv, VALUE self) {
 
-static VALUE
-rb_tree_merge(int argc, VALUE *argv, VALUE self) {
-  if(argc == 1 && RB_TYPE_P(argv[0], T_ARRAY)) {
-    return rb_tree_merge_(RARRAY_LEN(argv[0]), RARRAY_PTR(argv[0]), self);
-  } else {
-    return rb_tree_merge_(argc, argv, self);
-  }
-}
+//   if(argc == 1) {
+//     return argv[0];
+//   } else if(argc == 0) {
+//     return Qnil;
+//   }
+
+//   // should fit on the stack?
+//   TreePath *paths = ALLOCA_N(TreePath, argc);
+//   VALUE rb_tree = Qnil;
+//   Tree *tree = NULL;
+
+//   for(int i = 0; i < argc; i++) {
+//     VALUE rb_path = argv[i];
+//     TreePath *path;
+//     TypedData_Get_Struct(rb_path, TreePath, &tree_path_type, path);
+//     rb_tree = path->rb_tree;
+//     Tree *tree_ = (Tree *) DATA_PTR(rb_tree);
+//     if(tree != NULL && tree != tree_) {
+//       rb_raise(rb_eTreeSitterError, "nodes belong to different trees");
+//       return Qnil;
+//     }
+//     tree = tree_;
+//     paths[i] = path;
+//   }
+
+//   size_t len = argc;
+//   TreePath *out_paths = ALLOCA_N(TreePath, argc);
+
+//   int i = 0;
+// redo:
+//   size_t out_len = 0;
+//   bool change = rb_tree_merge__(paths, len, out_paths, &out_len);
+
+//   if(change && i++ < 20) {
+//     TreePath *tmp = pathes;
+//     pathes = out_paths;
+//     out_paths = tmp;
+//     len = out_len;
+//     goto redo;
+//   }
+
+//   VALUE rb_ary = rb_ary_new_capa(out_len);
+//   for(size_t i = 0; i < out_len; i++) {
+//     rb_ary_push(rb_ary, rb_new_node(rb_tree, out_nodes[i]));
+//   }
+//   return rb_ary;
+// }
+
+// static VALUE
+// rb_tree_merge(int argc, VALUE *argv, VALUE self) {
+//   if(argc == 1 && RB_TYPE_P(argv[0], T_ARRAY)) {
+//     return rb_tree_merge_(RARRAY_LEN(argv[0]), RARRAY_PTR(argv[0]), self);
+//   } else {
+//     return rb_tree_merge_(argc, argv, self);
+//   }
+// }
 
 static void
 find_path_by_byte(VALUE rb_tree, Language *language, TSNode node, uint32_t min_byte, uint32_t max_byte, TreePathNode **nodes_out, size_t *nodes_len_out) {
@@ -596,7 +599,7 @@ find_path_by_byte(VALUE rb_tree, Language *language, TSNode node, uint32_t min_b
 
   size_t nodes_capa = 16;
   size_t nodes_len = 0;
-  TreePathNode *nodes = RB_ALLOC_N(TreePathNode, nodes_capa);
+  TreePathNode *nodes = RB_ZALLOC_N(TreePathNode, nodes_capa);
 
   while(true) {
     uint32_t mid_byte = (uint32_t) (((uint64_t)max_byte + (uint64_t) min_byte) / 2);
@@ -799,7 +802,12 @@ rb_tree_path_get_node(TreePath *tree_path, long index) {
 }
 
 static VALUE
-rb_tree_path_aref(VALUE self, VALUE rb_index)
+raise_invalid_index_error(long index, long min, long max) {
+    rb_raise(rb_eIndexError, "index %ld outside bounds: %ld...%ld", index, min, max);
+}
+
+static VALUE
+rb_tree_path_aref_(VALUE self, VALUE rb_index, bool raise)
 {
   TreePath* tree_path;
   TypedData_Get_Struct(self, TreePath, &tree_path_type, tree_path);
@@ -809,14 +817,60 @@ rb_tree_path_aref(VALUE self, VALUE rb_index)
     index = tree_path->len + index;
   }
   if(index < 0 || index >= tree_path->len) {
-    rb_raise(rb_eIndexError, "index %ld outside bounds: %d...%u", index, 0,  (unsigned) tree_path->len);
+    if(raise) {
+      raise_invalid_index_error(index, 0, tree_path->len);
+    }
     return Qnil;
   }
   return rb_tree_path_get_node(tree_path, index);
 }
 
 static VALUE
-rb_tree_path_index_by_field(VALUE self, VALUE rb_field)
+rb_tree_path_aref(VALUE self, VALUE rb_index)
+{
+  return rb_tree_path_aref_(self, rb_index, false);
+}
+
+static VALUE
+rb_tree_path_at(VALUE self, VALUE rb_index) {
+  return rb_tree_path_aref_(self, rb_index, false);
+}
+
+static VALUE
+rb_tree_path_fetch(VALUE self, VALUE rb_index) {
+  return rb_tree_path_aref_(self, rb_index, true);
+}
+
+#define INDEX_METHOD_SETUP_BEFORE \
+  long before; \
+  if(RB_NIL_P(rb_before)) { \
+    before = tree_path->len; \
+  } else { \
+    before = FIX2LONG(rb_before); \
+    if(before < 0 || before >= tree_path->len) { \
+      raise_invalid_index_error(before, 0, tree_path->len); \
+    } \
+  } \
+  if(before == 0) return Qnil;
+
+#define INDEX_METHOD_SETUP_ARGS \
+  int elem_type = TYPE(rb_elems); \
+  long argc; \
+  VALUE *argv; \
+  if(elem_type == T_ARRAY) { \
+    argc = RARRAY_LEN(rb_elems); \
+    argv = RARRAY_PTR(rb_elems);\
+  } else if(elem_type == T_SYMBOL) {\
+    argc = 1;\
+    argv = &rb_elems;\
+  } else { \
+    rb_raise(rb_eArgError, "must pass symbol or array of symbols");\
+    return Qnil; \
+  }
+
+
+static VALUE
+rb_tree_path_rindex_by_field(VALUE self, VALUE rb_elems, VALUE rb_before)
 {
   TreePath* tree_path;
   TypedData_Get_Struct(self, TreePath, &tree_path_type, tree_path);
@@ -824,43 +878,43 @@ rb_tree_path_index_by_field(VALUE self, VALUE rb_field)
   // AstNode* node;
   // TypedData_Get_Struct(rb_node, AstNode, &node_type, node);
 
+  INDEX_METHOD_SETUP_BEFORE
+
   Language *language = rb_tree_language_(tree_path->rb_tree);
 
-  ID field_id = SYM2ID(rb_field);
-  TSFieldId ts_field_id;
-  if(!language_id2field(language, field_id, &ts_field_id)) {
-    rb_raise(rb_eArgError, "unkown field");
-    return Qnil;
-  }
+  INDEX_METHOD_SETUP_ARGS
 
-  for(uint32_t i = 0; i < tree_path->len; i++) {
+  for(long i = before - 1; i >= 0; i--) {
     TreePathNode path_node = tree_path->nodes[i];
-    if(path_node.field_id == ts_field_id) {
-      return UINT2NUM(i);
+    for(long j = 0; j < argc; j++) {
+      ID id = SYM2ID(argv[j]);
+      if(language_field2id(language, path_node.field_id) == id) {
+        return UINT2NUM(i);
+      }
     }
   }
   return Qnil;
 }
 
 static VALUE
-rb_tree_path_index_by_type(VALUE self, VALUE rb_type)
+rb_tree_path_rindex_by_type(VALUE self, VALUE rb_elems, VALUE rb_before)
 {
   TreePath* tree_path;
   TypedData_Get_Struct(self, TreePath, &tree_path_type, tree_path);
 
+  INDEX_METHOD_SETUP_BEFORE
+
   Language *language = rb_tree_language_(tree_path->rb_tree);
 
-  ID type_id = SYM2ID(rb_type);
-  TSSymbol ts_symbol;
-  if(!language_id2symbol(language, type_id, &ts_symbol)) {
-    rb_raise(rb_eArgError, "unkown field");
-    return Qnil;
-  }
+  INDEX_METHOD_SETUP_ARGS
 
-  for(uint32_t i = 0; i < tree_path->len; i++) {
+  for(long i = before - 1; i >= 0; i--) {
     TreePathNode path_node = tree_path->nodes[i];
-    if(ts_node_symbol(path_node.ts_node) == ts_symbol) {
-      return UINT2NUM(i);
+    for(long j = 0; j < argc; j++) {
+      ID id = SYM2ID(argv[j]);
+      if(language_symbol2id(language, ts_node_symbol(path_node.ts_node)) == id) {
+        return UINT2NUM(i);
+      }
     }
   }
   return Qnil;
@@ -890,6 +944,10 @@ rb_tree_path_last(VALUE self)
 {
   TreePath* tree_path;
   TypedData_Get_Struct(self, TreePath, &tree_path_type, tree_path);
+
+  if(tree_path->len == 0) {
+    return Qnil;
+  }
 
   return rb_tree_path_get_node(tree_path, tree_path->len - 1);
 }
@@ -938,7 +996,7 @@ init_tree()
 
   rb_define_method(rb_cTree, "__path_to__", rb_tree_path_to, 1);
   rb_define_method(rb_cTree, "__find_by_byte__", rb_tree_find_by_byte, 1);
-  rb_define_singleton_method(rb_cTree, "merge", rb_tree_merge, -1);
+  // rb_define_singleton_method(rb_cTree, "merge", rb_tree_merge, -1);
   rb_define_singleton_method(rb_cTree, "find_common_parent", rb_tree_find_common_parent, -1);
 
   rb_define_method(rb_cTree, "clone", rb_tree_copy, 0);
@@ -977,9 +1035,12 @@ init_tree()
   rb_cTreePath = rb_define_class_under(rb_cTree, "Path", rb_cObject);
   rb_include_module(rb_cTreePath, rb_mEnumerable);
   rb_define_method(rb_cTreePath, "[]", rb_tree_path_aref, 1);
+  rb_define_method(rb_cTreePath, "at", rb_tree_path_at, 1);
+  rb_define_method(rb_cTreePath, "fetch", rb_tree_path_fetch, 1);
   rb_define_method(rb_cTreePath, "size", rb_tree_path_size, 0);
   rb_define_method(rb_cTreePath, "each", rb_tree_path_each, 0);
-  rb_define_method(rb_cTreePath, "index_by_field", rb_tree_path_index_by_field, 1);
+  rb_define_method(rb_cTreePath, "__rindex_by_field__", rb_tree_path_rindex_by_field, 2);
+  rb_define_method(rb_cTreePath, "__rindex_by_type__", rb_tree_path_rindex_by_type, 2);
   rb_define_method(rb_cTreePath, "last", rb_tree_path_last, 0);
   rb_define_method(rb_cTreePath, "first", rb_tree_path_first, 0);
 
