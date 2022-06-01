@@ -36,6 +36,11 @@ typedef struct {
   VALUE rb_tree;
 } TreePath;
 
+typedef struct {
+  Language *language;
+  TSQuery *ts_query;
+} Query;
+
 void init_tree();
 VALUE rb_new_language(TSLanguage *ts_language);
 

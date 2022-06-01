@@ -12,11 +12,14 @@ void Init_javascript()
 
   VALUE mTreeSitter = rb_const_get(rb_cObject, rb_intern("TreeSitter"));
   VALUE cTree = rb_const_get(mTreeSitter, rb_intern("Tree"));
+  VALUE cQuery = rb_const_get(cTree, rb_intern("Query"));
 
   VALUE rb_cJavascript = rb_define_class_under(mTreeSitter, "Javascript", cTree);
+  VALUE rb_cJavascript_Query = rb_define_class_under(rb_cJavascript, "Query", cQuery);
 
   VALUE rb_cJavascript_s = rb_singleton_class(rb_cJavascript);
   VALUE rb_language = rb_new_language((TSLanguage *)tree_sitter_javascript());
 
   rb_ivar_set(rb_cJavascript, id___language__, rb_language);
+  rb_ivar_set(rb_cJavascript_Query, id___language__, rb_language);
 }

@@ -13,8 +13,8 @@ module TreeSitter
       Tree::Cursor.new self
     end
 
-    def to_h
-      __to_h__
+    def to_h(byte_ranges: false)
+      __to_h__(byte_ranges)
     end
 
     def inspect

@@ -12,11 +12,14 @@ void Init_verilog()
 
   VALUE mTreeSitter = rb_const_get(rb_cObject, rb_intern("TreeSitter"));
   VALUE cTree = rb_const_get(mTreeSitter, rb_intern("Tree"));
+  VALUE cQuery = rb_const_get(cTree, rb_intern("Query"));
 
   VALUE rb_cVerilog = rb_define_class_under(mTreeSitter, "Verilog", cTree);
+  VALUE rb_cVerilog_Query = rb_define_class_under(rb_cVerilog, "Query", cQuery);
 
   VALUE rb_cVerilog_s = rb_singleton_class(rb_cVerilog);
   VALUE rb_language = rb_new_language((TSLanguage *)tree_sitter_verilog());
 
   rb_ivar_set(rb_cVerilog, id___language__, rb_language);
+  rb_ivar_set(rb_cVerilog_Query, id___language__, rb_language);
 }

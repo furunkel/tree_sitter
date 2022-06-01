@@ -95,6 +95,16 @@ module TreeSitter
       def rindex_by_type(type, before: nil)
         __rindex_by_type__ type, before
       end
+
+      def find_by_type(type, before: nil, return_index: false)
+        __find_by_type__ type, before, return_index
+      end
+    end
+
+    class Query
+      def run(node, start_byte: nil, end_byte: nil, start_point: nil, end_point: nil)
+        __run__(node, start_byte, end_byte, start_point, end_point)
+      end
     end
 
   end

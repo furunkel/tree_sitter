@@ -1,6 +1,6 @@
 #include "tree.h"
 #include "tree_sitter/api.h"
-
+#include <wctype.h>
 static VALUE rb_cTree;
 static VALUE rb_cTreeCursor;
 static VALUE rb_cLanguage;
@@ -79,7 +79,6 @@ const rb_data_type_t tree_cursor_type = {
     .flags = RUBY_TYPED_FREE_IMMEDIATELY,
 };
 
-
 static void
 tree_path_free(void* obj)
 {
@@ -106,6 +105,31 @@ const rb_data_type_t tree_path_type = {
     .flags = RUBY_TYPED_FREE_IMMEDIATELY,
 };
 
+
+static void
+query_free(void* obj)
+{
+  Query* query = (Query*)obj;
+  ts_query_delete(query->ts_query);
+  xfree(obj);
+}
+
+static void
+query_mark(void* obj)
+{
+  // Query* query = (Query *)obj;
+}
+
+const rb_data_type_t query_type = {
+    .wrap_struct_name = "Language::Query",
+    .function = {
+        .dmark = query_mark,
+        .dfree = query_free,
+        .dsize = NULL,
+    },
+    .data = NULL,
+    .flags = RUBY_TYPED_FREE_IMMEDIATELY,
+};
 
 static void
 language_free(void* obj)
@@ -233,6 +257,131 @@ bool language_id2symbol(Language *language, ID id, TSSymbol *symbol) {
     return true;
   }
   return false;
+}
+
+
+static VALUE
+rb_query_new(VALUE self, VALUE rb_source) {
+  Check_Type(rb_source, T_STRING);
+
+  char *source = RSTRING_PTR(rb_source);
+  size_t length = RSTRING_LEN(rb_source);
+
+  uint32_t error_offset;
+  TSQueryError error_type;
+
+  VALUE rb_language = rb_ivar_get(self, id___language__);
+  Language* language;
+  TypedData_Get_Struct(rb_language, Language, &language_type, language);
+
+  TSQuery *ts_query = ts_query_new(language->ts_language, source, length, &error_offset, &error_type);
+  if(!ts_query) {
+        // Adapted from https://github.com/tree-sitter/py-tree-sitter/blob/master/tree_sitter/binding.c
+        // The MIT License (MIT)
+        // Original version Copyright (c) 2019 Max Brunsfeld, GitHub
+        char *word_start = &source[error_offset];
+        char *word_end = word_start;
+        while (word_end < &source[length] &&
+               (iswalnum(*word_end) || *word_end == '-' || *word_end == '_' || *word_end == '?' ||
+                *word_end == '.'))
+            word_end++;
+        char c = *word_end;
+        *word_end = 0;
+        switch (error_type) {
+        case TSQueryErrorNodeType:
+            rb_raise(rb_eArgError, "Invalid node type %s", &source[error_offset]);
+            break;
+        case TSQueryErrorField:
+            rb_raise(rb_eArgError, "Invalid field name %s", &source[error_offset]);
+            break;
+        case TSQueryErrorCapture:
+            rb_raise(rb_eArgError, "Invalid capture name %s", &source[error_offset]);
+            break;
+        default:
+            rb_raise(rb_eArgError, "Invalid syntax at offset %u", error_offset);
+            break;
+        }
+        *word_end = c;
+        return Qnil;
+  }
+
+  Query *query = RB_ZALLOC(Query);
+
+  query->language = language;
+  query->ts_query = ts_query;
+
+  return TypedData_Wrap_Struct(self, &query_type, query);
+}
+
+typedef struct {
+  TSQueryCursor *cursor;
+  AstNode *node;
+} QueryRunArgs;
+
+static VALUE
+rb_query_run_yield(VALUE args_) {
+  QueryRunArgs *args = (QueryRunArgs *) args_;
+  uint32_t capture_index;
+  TSQueryMatch match;
+  while (ts_query_cursor_next_capture(args->cursor, &match, &capture_index)) {
+    VALUE rb_captures = rb_ary_new_capa(match.capture_count);
+    for(uint32_t i = 0; i < match.capture_count; i++) {
+      //FIXME: use match.captures[i].index to set the index of the capture.
+      rb_ary_push(rb_captures, rb_new_node(args->node->rb_tree, match.captures[i].node));
+    }
+    rb_yield_values(2, rb_captures, UINT2NUM(match.pattern_index));
+  }
+  return Qnil;
+}
+
+static VALUE
+rb_query_run_ensure(VALUE args_) {
+  QueryRunArgs *args = (QueryRunArgs *) args_;
+  ts_query_cursor_delete(args->cursor);
+  return Qnil;
+}
+
+static VALUE
+rb_query_run(VALUE self, VALUE rb_node, VALUE rb_start_byte, VALUE rb_end_byte, VALUE rb_start_point, VALUE rb_end_point) {
+
+  Query* query;
+  TypedData_Get_Struct(self, Query, &query_type, query);
+
+  TSPoint start_point = {.row = 0, .column = 0};
+  TSPoint end_point = {.row = UINT32_MAX, .column = UINT32_MAX};
+  unsigned start_byte = 0, end_byte = UINT32_MAX;
+
+  if(RTEST(rb_start_byte)) {
+    start_byte = FIX2UINT(rb_start_byte);
+  }
+
+  if(RTEST(rb_end_byte)) {
+    end_byte = FIX2UINT(rb_end_byte);
+  }
+
+  if(RTEST(rb_start_point)) {
+    start_point = rb_point_point_(rb_start_point);
+  }
+
+  if(RTEST(rb_end_point)) {
+    end_point = rb_point_point_(rb_end_point);
+  }
+
+  AstNode* node;
+  TypedData_Get_Struct(rb_node, AstNode, &node_type, node);
+
+  TSQueryCursor *cursor = ts_query_cursor_new();
+  ts_query_cursor_set_byte_range(cursor, start_byte, end_byte);
+  ts_query_cursor_set_point_range(cursor, start_point, end_point);
+  ts_query_cursor_exec(cursor, query->ts_query, node->ts_node);
+
+  QueryRunArgs run_args = {
+    .cursor = cursor,
+    .node = node,
+  };
+
+  rb_ensure(rb_query_run_yield, (VALUE) &run_args, rb_query_run_ensure, (VALUE) &run_args);
+  return self;
 }
 
 static VALUE
@@ -851,7 +1000,7 @@ rb_tree_path_fetch(VALUE self, VALUE rb_index) {
       raise_invalid_index_error(before, 0, tree_path->len); \
     } \
   } \
-  if(before == 0) return Qnil;
+  if(before == 0) return -1;
 
 #define INDEX_METHOD_SETUP_ARGS \
   int elem_type = TYPE(rb_elems); \
@@ -865,8 +1014,65 @@ rb_tree_path_fetch(VALUE self, VALUE rb_index) {
     argv = &rb_elems;\
   } else { \
     rb_raise(rb_eArgError, "must pass symbol or array of symbols");\
-    return Qnil; \
+    return -1; \
   }
+
+
+static long
+tree_path_rindex_by_type(TreePath *tree_path, VALUE rb_elems, VALUE rb_before) {
+  INDEX_METHOD_SETUP_BEFORE
+  Language *language = rb_tree_language_(tree_path->rb_tree);
+  INDEX_METHOD_SETUP_ARGS
+
+  for(long i = before - 1; i >= 0; i--) {
+    TreePathNode path_node = tree_path->nodes[i];
+    for(long j = 0; j < argc; j++) {
+      ID id = SYM2ID(argv[j]);
+      if(language_symbol2id(language, ts_node_symbol(path_node.ts_node)) == id) {
+        return i;
+      }
+    }
+  }
+  return -1;
+}
+
+static long
+tree_path_rindex_by_field(TreePath *tree_path, VALUE rb_elems, VALUE rb_before) {
+  INDEX_METHOD_SETUP_BEFORE
+  Language *language = rb_tree_language_(tree_path->rb_tree);
+  INDEX_METHOD_SETUP_ARGS
+
+  for(long i = before - 1; i >= 0; i--) {
+    TreePathNode path_node = tree_path->nodes[i];
+    for(long j = 0; j < argc; j++) {
+      ID id = SYM2ID(argv[j]);
+      if(language_field2id(language, path_node.field_id) == id) {
+        return i;
+      }
+    }
+  }
+  return -1;
+}
+
+
+static VALUE
+rb_tree_path_find_by_type(VALUE self, VALUE rb_elems, VALUE rb_before, VALUE rb_return_index) {
+  TreePath* tree_path;
+  TypedData_Get_Struct(self, TreePath, &tree_path_type, tree_path);
+
+  long index = tree_path_rindex_by_type(tree_path, rb_elems, rb_before);
+  if(index < 0) {
+    return Qnil;
+  } else {
+    VALUE rb_node = rb_tree_path_get_node(tree_path, index);
+    rb_p(rb_node);
+    if(RB_TEST(rb_return_index)) {
+      return rb_assoc_new(rb_node, LONG2FIX(index));
+    } else {
+      return rb_node;
+    }
+  }
+}
 
 
 static VALUE
@@ -875,25 +1081,12 @@ rb_tree_path_rindex_by_field(VALUE self, VALUE rb_elems, VALUE rb_before)
   TreePath* tree_path;
   TypedData_Get_Struct(self, TreePath, &tree_path_type, tree_path);
 
-  // AstNode* node;
-  // TypedData_Get_Struct(rb_node, AstNode, &node_type, node);
-
-  INDEX_METHOD_SETUP_BEFORE
-
-  Language *language = rb_tree_language_(tree_path->rb_tree);
-
-  INDEX_METHOD_SETUP_ARGS
-
-  for(long i = before - 1; i >= 0; i--) {
-    TreePathNode path_node = tree_path->nodes[i];
-    for(long j = 0; j < argc; j++) {
-      ID id = SYM2ID(argv[j]);
-      if(language_field2id(language, path_node.field_id) == id) {
-        return UINT2NUM(i);
-      }
-    }
+  long index = tree_path_rindex_by_field(tree_path, rb_elems, rb_before);
+  if(index < 0) {
+    return Qnil;
+  } else {
+    return LONG2FIX(index);
   }
-  return Qnil;
 }
 
 static VALUE
@@ -902,22 +1095,12 @@ rb_tree_path_rindex_by_type(VALUE self, VALUE rb_elems, VALUE rb_before)
   TreePath* tree_path;
   TypedData_Get_Struct(self, TreePath, &tree_path_type, tree_path);
 
-  INDEX_METHOD_SETUP_BEFORE
-
-  Language *language = rb_tree_language_(tree_path->rb_tree);
-
-  INDEX_METHOD_SETUP_ARGS
-
-  for(long i = before - 1; i >= 0; i--) {
-    TreePathNode path_node = tree_path->nodes[i];
-    for(long j = 0; j < argc; j++) {
-      ID id = SYM2ID(argv[j]);
-      if(language_symbol2id(language, ts_node_symbol(path_node.ts_node)) == id) {
-        return UINT2NUM(i);
-      }
-    }
+  long index = tree_path_rindex_by_type(tree_path, rb_elems, rb_before);
+  if(index < 0) {
+    return Qnil;
+  } else {
+    return LONG2FIX(index);
   }
-  return Qnil;
 }
 
 
@@ -1041,7 +1224,11 @@ init_tree()
   rb_define_method(rb_cTreePath, "each", rb_tree_path_each, 0);
   rb_define_method(rb_cTreePath, "__rindex_by_field__", rb_tree_path_rindex_by_field, 2);
   rb_define_method(rb_cTreePath, "__rindex_by_type__", rb_tree_path_rindex_by_type, 2);
+  rb_define_method(rb_cTreePath, "__find_by_type__", rb_tree_path_find_by_type, 3);
   rb_define_method(rb_cTreePath, "last", rb_tree_path_last, 0);
   rb_define_method(rb_cTreePath, "first", rb_tree_path_first, 0);
 
+  VALUE rb_cQuery = rb_define_class_under(rb_cTree, "Query", rb_cObject);
+  rb_define_singleton_method(rb_cQuery, "new", rb_query_new, 1);
+  rb_define_method(rb_cQuery, "__run__", rb_query_run, 5);
 }

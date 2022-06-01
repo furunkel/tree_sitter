@@ -21,3 +21,4 @@ VALUE rb_node_byte_range_(TSNode node);
 VALUE rb_node_text_(TSNode ts_node, VALUE rb_input);
 VALUE rb_new_node(VALUE rb_tree, TSNode ts_node);
 VALUE rb_new_node_with_field(VALUE rb_tree, TSNode ts_node, TSFieldId field_id);
+TSPoint rb_point_point_(VALUE rb_point);

@@ -12,11 +12,14 @@ void Init_scala()
 
   VALUE mTreeSitter = rb_const_get(rb_cObject, rb_intern("TreeSitter"));
   VALUE cTree = rb_const_get(mTreeSitter, rb_intern("Tree"));
+  VALUE cQuery = rb_const_get(cTree, rb_intern("Query"));
 
   VALUE rb_cScala = rb_define_class_under(mTreeSitter, "Scala", cTree);
+  VALUE rb_cScala_Query = rb_define_class_under(rb_cScala, "Query", cQuery);
 
   VALUE rb_cScala_s = rb_singleton_class(rb_cScala);
   VALUE rb_language = rb_new_language((TSLanguage *)tree_sitter_scala());
 
   rb_ivar_set(rb_cScala, id___language__, rb_language);
+  rb_ivar_set(rb_cScala_Query, id___language__, rb_language);
 }

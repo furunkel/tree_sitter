@@ -774,6 +774,13 @@ rb_point_column(VALUE self)
   return UINT2NUM(point->ts_point.column);
 }
 
+TSPoint
+rb_point_point_(VALUE self) {
+  Point *point;
+  TypedData_Get_Struct(self, Point, &point_type, point);
+  return point->ts_point;
+}
+
 static void
 rb_tree_check_attached(Tree *tree) {
   if(NIL_P(tree->rb_input)) {
@@ -961,7 +968,7 @@ rb_node_hash(VALUE self) {
 }
 
 static VALUE
-node_to_hash(TSTreeCursor *cursor, TSNode node, Tree* tree)
+node_to_hash(TSTreeCursor *cursor, TSNode node, Tree* tree, bool include_byte_ranges)
 {
   VALUE rb_hash = rb_hash_new();
 
@@ -982,8 +989,10 @@ node_to_hash(TSTreeCursor *cursor, TSNode node, Tree* tree)
     VALUE rb_text = rb_node_text_(node, tree->rb_input);
     rb_hash_aset(rb_hash, RB_ID2SYM(id_text), rb_text);
   } else {
-    VALUE rb_byte_range = rb_node_byte_range_(node);
-    rb_hash_aset(rb_hash, RB_ID2SYM(id_byte_range), rb_byte_range);
+    if(include_byte_ranges) {
+      VALUE rb_byte_range = rb_node_byte_range_(node);
+      rb_hash_aset(rb_hash, RB_ID2SYM(id_byte_range), rb_byte_range);
+    }
   }
 
   const char *field_name = ts_tree_cursor_current_field_name(cursor);
@@ -999,7 +1008,7 @@ node_to_hash(TSTreeCursor *cursor, TSNode node, Tree* tree)
         TSNode child_node = ts_tree_cursor_current_node(cursor);
         TSTreeCursor child_cursor = ts_tree_cursor_copy(cursor);
         if(ts_node_is_named(child_node)) {
-          VALUE rb_child_hash = node_to_hash(&child_cursor, child_node, tree);
+          VALUE rb_child_hash = node_to_hash(&child_cursor, child_node, tree, include_byte_ranges);
           rb_ary_push(rb_children, rb_child_hash);
         }
         ts_tree_cursor_delete(&child_cursor);
@@ -1007,20 +1016,22 @@ node_to_hash(TSTreeCursor *cursor, TSNode node, Tree* tree)
     }
   }
 
-  rb_hash_aset(rb_hash, RB_ID2SYM(id_children), rb_children);
+  if(!RB_NIL_P(rb_children)) {
+    rb_hash_aset(rb_hash, RB_ID2SYM(id_children), rb_children);
+  }
 
   return rb_hash;
 }
 
 static VALUE
-rb_node_to_h(VALUE self)
+rb_node_to_h(VALUE self, VALUE rb_byte_ranges)
 {
   AstNode *node;
   TypedData_Get_Struct(self, AstNode, &node_type, node);
   TSTreeCursor cursor = ts_tree_cursor_new(node->ts_node);
 
   Tree *tree = node_get_tree(node);
-  VALUE rb_hash = node_to_hash(&cursor, node->ts_node, tree);
+  VALUE rb_hash = node_to_hash(&cursor, node->ts_node, tree, RB_TEST(rb_byte_ranges));
 
   ts_tree_cursor_delete(&cursor);
   return rb_hash;
@@ -1074,7 +1085,7 @@ void init_node()
   rb_define_method(rb_cNode, "hash", rb_node_hash, 0);
   rb_define_method(rb_cNode, "eql?", rb_node_eq, 1);
   rb_define_method(rb_cNode, "descendant_of_type?", rb_node_descendant_of_type, 1);
-  rb_define_private_method(rb_cNode, "__to_h__", rb_node_to_h, 0);
+  rb_define_private_method(rb_cNode, "__to_h__", rb_node_to_h, 1);
   rb_define_method(rb_cNode, "text?", rb_node_text_p, -1);
   rb_define_method(rb_cNode, "type?", rb_node_type_p, -1);
 
