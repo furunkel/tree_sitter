@@ -243,7 +243,6 @@ rb_new_language(TSLanguage *ts_language)
   return TypedData_Wrap_Struct(rb_cLanguage, &language_type, language);
 }
 
-<<<<<<< HEAD
 static VALUE
 rb_language_fields(VALUE self) {
   Language* language;
@@ -251,7 +250,7 @@ rb_language_fields(VALUE self) {
 
   VALUE rb_fields = rb_ary_new_capa(language->field_count);
   for(size_t i = 0; i < language->field_count; i++) {
-    rb_ary_push(rb_fields, ID2SYM(language->ts_field2id[i]));
+    rb_ary_push(rb_fields, RB_ID2SYM(language->ts_field2id[i]));
   }
 
   return rb_fields;
@@ -264,10 +263,11 @@ rb_language_symbols(VALUE self) {
 
   VALUE rb_symbols = rb_ary_new_capa(language->symbol_count);
   for(size_t i = 0; i < language->symbol_count; i++) {
-    rb_ary_push(rb_symbols, ID2SYM(language->ts_symbol2id[i]));
+    rb_ary_push(rb_symbols, RB_ID2SYM(language->ts_symbol2id[i]));
   }
   return rb_symbols;
-=======
+}
+
 bool language_id2field(Language *language, ID id, TSFieldId *field_id) {
   st_data_t ts_field_id;
   if(st_lookup(language->ts_field_table, (st_data_t) id, &ts_field_id)) {
@@ -285,7 +285,6 @@ bool language_id2symbol(Language *language, ID id, TSSymbol *symbol) {
   }
   return false;
 }
-
 
 static VALUE
 rb_query_new(VALUE self, VALUE rb_source) {
@@ -409,7 +408,10 @@ rb_query_run(VALUE self, VALUE rb_node, VALUE rb_start_byte, VALUE rb_end_byte, 
 
   rb_ensure(rb_query_run_yield, (VALUE) &run_args, rb_query_run_ensure, (VALUE) &run_args);
   return self;
+<<<<<<< HEAD
 >>>>>>> a537fb0e2edd4a71547e122bd0267d230ed4357c
+=======
+>>>>>>> dcb78ffb591863425b7485eaf3f3c03fba01333c
 }
 
 static VALUE
@@ -1265,4 +1267,8 @@ init_tree()
   VALUE rb_cQuery = rb_define_class_under(rb_cTree, "Query", rb_cObject);
   rb_define_singleton_method(rb_cQuery, "new", rb_query_new, 1);
   rb_define_method(rb_cQuery, "__run__", rb_query_run, 5);
+<<<<<<< HEAD
+=======
+
+>>>>>>> dcb78ffb591863425b7485eaf3f3c03fba01333c
 }
