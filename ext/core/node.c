@@ -7,6 +7,12 @@
 VALUE rb_cNode;
 VALUE rb_cPoint;
 
+static ID id_type;
+static ID id_byte_range;
+static ID id_children;
+static ID id_field;
+static ID id_text;
+
 static void node_free(void *n)
 {
   xfree(n);
@@ -94,9 +100,21 @@ rb_node_type(VALUE self)
   TypedData_Get_Struct(self, AstNode, &node_type, node);
 
   Language *language = rb_tree_language_(node->rb_tree);
-  return ID2SYM(language->ts_symbol2id[ts_node_symbol(node->ts_node)]);
+  VALUE rb_type = RB_ID2SYM(language_symbol2id(language, ts_node_symbol(node->ts_node)));
+  return rb_type;
 
   // return rb_str_new_cstr(ts_node_type(node->ts_node));
+}
+
+static VALUE
+rb_node_type_p_(AstNode *node, Language *language, int argc, VALUE *argv) {
+  for(int i = 0; i < argc; i++) {
+    Check_Type(argv[i], T_SYMBOL);
+    ID id = SYM2ID(argv[i]);
+    ID node_id = language_symbol2id(language, ts_node_symbol(node->ts_node));
+    if(id == node_id) return Qtrue;
+  }
+  return Qfalse;
 }
 
 static VALUE
@@ -106,15 +124,11 @@ rb_node_type_p(int argc, VALUE *argv, VALUE self)
   TypedData_Get_Struct(self, AstNode, &node_type, node);
   Language *language = rb_tree_language_(node->rb_tree);
 
-  for(int i = 0; i < argc; i++) {
-    if(RB_TYPE_P(argv[i], T_SYMBOL)) {
-      ID id = SYM2ID(argv[i]);
-      ID node_id = language->ts_symbol2id[ts_node_symbol(node->ts_node)];
-      if(id == node_id) return Qtrue;
-    }
+  if(argc == 1 && RB_TYPE_P(argv[0], T_ARRAY)) {
+    return rb_node_type_p_(node, language, RARRAY_LEN(argv[0]), RARRAY_PTR(argv[0]));
+  } else {
+    return rb_node_type_p_(node, language, argc, argv);
   }
-
-  return Qfalse;
 }
 
 static VALUE
@@ -465,7 +479,7 @@ rb_node_field(VALUE self) {
   Language *language = rb_tree_language_(node->rb_tree);
 
   if(node->cached_field != 0) {
-    ID id = language->ts_field2id[node->cached_field];
+    ID id = language_field2id(language, node->cached_field);
     return RB_ID2SYM(id);
   }
 
@@ -484,7 +498,7 @@ rb_node_field(VALUE self) {
     if(node->ts_node.id == child_node.id) {
       TSFieldId field_id = ts_tree_cursor_current_field_id(&cursor);
       if(field_id != 0) {
-        rb_retval = RB_ID2SYM(language->ts_field2id[field_id]);
+        rb_retval = RB_ID2SYM(language_field2id(language, field_id));
         goto done;
       }
     }
@@ -496,37 +510,49 @@ done:
 }
 
 static VALUE
-rb_node_field_p(VALUE self, VALUE rb_field) {
+rb_node_field_p_(AstNode *node, Language *language, int argc, VALUE *argv) {
+  if(node->cached_field != 0) {
+    ID node_field_id = language_field2id(language, node->cached_field);
+    for(int i = 0; i < argc; i++) {
+      VALUE rb_field = argv[i];
+      Check_Type(rb_field, T_SYMBOL);
+
+      ID field_id = SYM2ID(rb_field);
+      if(node_field_id == field_id) return Qtrue;
+    }
+    return Qfalse;
+  } else {
+    TSNode parent_node = ts_node_parent(node->ts_node);
+    if(ts_node_is_null(parent_node)) {
+      return Qfalse;
+    }
+
+    for(int i = 0; i < argc; i++) {
+      VALUE rb_field = argv[i];
+      Check_Type(rb_field, T_SYMBOL);
+
+      ID field_id = SYM2ID(rb_field);
+      TSFieldId ts_field_id;
+      if(language_id2field(language, field_id, &ts_field_id)) {
+        TSNode child = ts_node_child_by_field_id(parent_node, ts_field_id);
+        if(child.id == node->ts_node.id) return Qtrue;
+      }
+    }
+    return Qfalse;
+  }
+}
+
+static VALUE
+rb_node_field_p(int argc, VALUE *argv, VALUE self) {
   AstNode *node;
   TypedData_Get_Struct(self, AstNode, &node_type, node);
 
-  if(!RB_TYPE_P(rb_field, T_SYMBOL)) return Qfalse;
-
   Language *language = rb_tree_language_(node->rb_tree);
 
-  if(node->cached_field != 0) {
-    ID id = language->ts_field2id[node->cached_field];
-    ID field_id = RB_SYM2ID(rb_field);
-    return id == field_id ? Qtrue : Qfalse;
-  }
-
-  TSNode parent_node = ts_node_parent(node->ts_node);
-  if(ts_node_is_null(parent_node)) {
-    return Qfalse;
-  }
-
-
-  ID id = SYM2ID(rb_field);
-  st_data_t field_id;
-  if(st_lookup(language->ts_field_table, (st_data_t) id, &field_id)) {
-    TSNode child = ts_node_child_by_field_id(parent_node, field_id);
-    if(ts_node_is_null(child)) {
-      return Qfalse;
-    } else {
-      return (child.id == node->ts_node.id) ? Qtrue : Qfalse;
-    }
+  if(argc == 1 && RB_TYPE_P(argv[0], T_ARRAY)) {
+    return rb_node_field_p_(node, language, RARRAY_LEN(argv[0]), RARRAY_PTR(argv[0]));
   } else {
-    return Qfalse;
+    return rb_node_field_p_(node, language, argc, argv);
   }
 }
 
@@ -576,15 +602,39 @@ rb_node_named_child_at(VALUE self, VALUE child_index)
     }
   }
 
-  if (i > child_count) {
+  if (i >= child_count) return Qnil;
+
+  TSNode child = ts_node_named_child(node->ts_node, i);
+  if(ts_node_is_null(child)) {
     return Qnil;
-  } else {
-    TSNode child = ts_node_named_child(node->ts_node, i);
-    if(ts_node_is_null(child)) {
-      return Qnil;
-    }
-    return rb_new_node(node->rb_tree, child);
   }
+  return rb_new_node(node->rb_tree, child);
+}
+
+static VALUE
+rb_node_named_child_at_p(VALUE self, VALUE child_index, VALUE rb_child)
+{
+  Check_Type(child_index, T_FIXNUM);
+  int64_t i = FIX2INT(child_index);
+
+  AstNode *node;
+  TypedData_Get_Struct(self, AstNode, &node_type, node);
+
+  AstNode *child_node;
+  TypedData_Get_Struct(rb_child, AstNode, &node_type, child_node);
+
+  int64_t child_count = ts_node_named_child_count(node->ts_node);
+
+  if(i < 0) {
+    i += child_count;
+    if(i < 0) {
+      return Qfalse;
+    }
+  }
+  if(i >= child_count) return Qfalse;
+
+  TSNode child = ts_node_named_child(node->ts_node, i);
+  return child_node->ts_node.id == child.id ? Qtrue : Qfalse;
 }
 
 /*
@@ -724,6 +774,13 @@ rb_point_column(VALUE self)
   return UINT2NUM(point->ts_point.column);
 }
 
+TSPoint
+rb_point_point_(VALUE self) {
+  Point *point;
+  TypedData_Get_Struct(self, Point, &point_type, point);
+  return point->ts_point;
+}
+
 static void
 rb_tree_check_attached(Tree *tree) {
   if(NIL_P(tree->rb_input)) {
@@ -741,13 +798,13 @@ rb_node_check_input_range(uint32_t start_byte, uint32_t end_byte, size_t input_l
 VALUE rb_node_text_(TSNode ts_node, VALUE rb_input) {
   uint32_t start_byte = ts_node_start_byte(ts_node);
   uint32_t end_byte = ts_node_end_byte(ts_node);
-  const char *input = RSTRING_PTR(rb_input);
-
-  size_t input_len = RSTRING_LEN(rb_input);
 
   if(start_byte == end_byte) {
-    return Qnil;
+    return rb_str_new("", 0);
   }
+
+  const char *input = RSTRING_PTR(rb_input);
+  size_t input_len = RSTRING_LEN(rb_input);
 
   rb_node_check_input_range(start_byte, end_byte, input_len);
   return rb_str_new(input + start_byte, end_byte - start_byte);
@@ -763,7 +820,35 @@ rb_node_text(VALUE self)
   TypedData_Get_Struct(node->rb_tree, Tree, &tree_type, tree);
 
   rb_tree_check_attached(tree);
-  return rb_node_text_(node->ts_node, tree->rb_input);
+  VALUE rb_text = rb_node_text_(node->ts_node, tree->rb_input);
+
+  return rb_text;
+}
+
+static VALUE
+rb_node_text_starts_with_p(VALUE self, VALUE rb_prefix) {
+
+  Check_Type(rb_prefix, T_STRING);
+
+  AstNode *node;
+  TypedData_Get_Struct(self, AstNode, &node_type, node);
+
+  Tree *tree;
+  TypedData_Get_Struct(node->rb_tree, Tree, &tree_type, tree);
+  rb_tree_check_attached(tree);
+
+  VALUE rb_input = tree->rb_input;
+  const char *input = RSTRING_PTR(rb_input);
+
+  uint32_t start_byte = ts_node_start_byte(node->ts_node);
+  uint32_t end_byte = ts_node_end_byte(node->ts_node);
+
+  long prefix_len = RSTRING_LEN(rb_prefix);
+
+  if(prefix_len > end_byte - start_byte) return Qfalse;
+  if(prefix_len == 0) return Qtrue;
+  if(!rb_memcmp(input + start_byte, RSTRING_PTR(rb_prefix), prefix_len)) return Qtrue;
+  return Qfalse;
 }
 
 static VALUE
@@ -817,19 +902,33 @@ rb_node_byte_range(VALUE self) {
   return rb_node_byte_range_(node->ts_node);
 }
 
+static VALUE
+rb_node_start_byte(VALUE self) {
+  AstNode *node;
+  TypedData_Get_Struct(self, AstNode, &node_type, node);
+  return INT2FIX(ts_node_start_byte(node->ts_node));
+}
+
+static VALUE
+rb_node_end_byte(VALUE self) {
+  AstNode *node;
+  TypedData_Get_Struct(self, AstNode, &node_type, node);
+  return INT2FIX(ts_node_end_byte(node->ts_node));
+}
+
 
 static VALUE
 rb_node_descendant_of_type(VALUE self, VALUE rb_ancestor_type) {
   AstNode *node;
-  st_data_t symbol;
+  TSSymbol ts_symbol;
 
   TypedData_Get_Struct(self, AstNode, &node_type, node);
   Language *language = rb_tree_language_(node->rb_tree);
 
-  if(st_lookup(language->ts_symbol_table, (st_data_t) SYM2ID(rb_ancestor_type), &symbol)) {
+  if(language_id2symbol(language, SYM2ID(rb_ancestor_type), &ts_symbol)) {
     TSNode n = ts_node_parent(node->ts_node);
     while(!ts_node_is_null(n)) {
-      if(ts_node_symbol(n) == (TSSymbol) symbol) {
+      if(ts_node_symbol(n) == ts_symbol) {
         return Qtrue;
       }
       n = ts_node_parent(n);    
@@ -868,10 +967,86 @@ rb_node_hash(VALUE self) {
   return RB_ST2FIX((st_index_t) node->ts_node.id);
 }
 
+static VALUE
+node_to_hash(TSTreeCursor *cursor, TSNode node, Tree* tree, bool include_byte_ranges)
+{
+  VALUE rb_hash = rb_hash_new();
+
+  const char* type = ts_node_type(node);
+  VALUE rb_type;
+  if (type != NULL) {
+    rb_type = rb_str_new2(type);
+  } else {
+    rb_type = Qnil;
+  }
+
+  rb_hash_aset(rb_hash, RB_ID2SYM(id_type), rb_type);
+
+  uint32_t named_child_count = ts_node_named_child_count(node);
+  VALUE rb_children = Qnil;
+
+  if (named_child_count == 0 && tree->rb_input != Qnil) {
+    VALUE rb_text = rb_node_text_(node, tree->rb_input);
+    rb_hash_aset(rb_hash, RB_ID2SYM(id_text), rb_text);
+  } else {
+    if(include_byte_ranges) {
+      VALUE rb_byte_range = rb_node_byte_range_(node);
+      rb_hash_aset(rb_hash, RB_ID2SYM(id_byte_range), rb_byte_range);
+    }
+  }
+
+  const char *field_name = ts_tree_cursor_current_field_name(cursor);
+  if (field_name) {
+    VALUE rb_field_name = rb_str_new_cstr(field_name);
+    rb_hash_aset(rb_hash, RB_ID2SYM(id_field), rb_field_name);
+  }
+
+  if (named_child_count > 0) {
+    rb_children = rb_ary_new_capa(named_child_count);
+    if(ts_tree_cursor_goto_first_child(cursor)) {
+      do {
+        TSNode child_node = ts_tree_cursor_current_node(cursor);
+        TSTreeCursor child_cursor = ts_tree_cursor_copy(cursor);
+        if(ts_node_is_named(child_node)) {
+          VALUE rb_child_hash = node_to_hash(&child_cursor, child_node, tree, include_byte_ranges);
+          rb_ary_push(rb_children, rb_child_hash);
+        }
+        ts_tree_cursor_delete(&child_cursor);
+      } while(ts_tree_cursor_goto_next_sibling(cursor));
+    }
+  }
+
+  if(!RB_NIL_P(rb_children)) {
+    rb_hash_aset(rb_hash, RB_ID2SYM(id_children), rb_children);
+  }
+
+  return rb_hash;
+}
+
+static VALUE
+rb_node_to_h(VALUE self, VALUE rb_byte_ranges)
+{
+  AstNode *node;
+  TypedData_Get_Struct(self, AstNode, &node_type, node);
+  TSTreeCursor cursor = ts_tree_cursor_new(node->ts_node);
+
+  Tree *tree = node_get_tree(node);
+  VALUE rb_hash = node_to_hash(&cursor, node->ts_node, tree, RB_TEST(rb_byte_ranges));
+
+  ts_tree_cursor_delete(&cursor);
+  return rb_hash;
+}
+
 
 void init_node()
 {
   VALUE rb_mTreeSitter = rb_define_module("TreeSitter");
+
+  id_type = rb_intern("type");
+  id_byte_range = rb_intern("byte_range");
+  id_children = rb_intern("children");
+  id_field = rb_intern("field");
+  id_text = rb_intern("text");
 
   rb_cNode = rb_define_class_under(rb_mTreeSitter, "Node", rb_cObject);
   rb_define_method(rb_cNode, "to_s", rb_node_to_s, 0);
@@ -889,10 +1064,11 @@ void init_node()
   rb_define_method(rb_cNode, "child_at", rb_node_child_at, 1);
   rb_define_method(rb_cNode, "dig", rb_node_dig, -1);
   rb_define_method(rb_cNode, "child_by_field", rb_node_child_by_field, 1);
-  rb_define_method(rb_cNode, "field?", rb_node_field_p, 1);
+  rb_define_method(rb_cNode, "field?", rb_node_field_p, -1);
   rb_define_method(rb_cNode, "field", rb_node_field, 0);
   rb_define_method(rb_cNode, "has_ancestor_path?", rb_node_has_ancestor_path, -1);
   rb_define_method(rb_cNode, "named_child_at", rb_node_named_child_at, 1);
+  rb_define_method(rb_cNode, "named_child_at?", rb_node_named_child_at_p, 2);
   rb_define_method(rb_cNode, "start_position", rb_node_start_point, 0);
   rb_define_method(rb_cNode, "end_position", rb_node_end_point, 0);
   rb_define_method(rb_cNode, "children", rb_node_children, 0);
@@ -901,12 +1077,15 @@ void init_node()
   rb_define_method(rb_cNode, "named_children", rb_node_named_children, 0);
   rb_define_method(rb_cNode, "each_named_child", rb_node_each_named_child, 0);
   rb_define_method(rb_cNode, "text", rb_node_text, 0);
+  rb_define_method(rb_cNode, "text_starts_with?", rb_node_text_starts_with_p, 1);
   rb_define_method(rb_cNode, "byte_range", rb_node_byte_range, 0);
+  rb_define_method(rb_cNode, "start_byte", rb_node_start_byte, 0);
+  rb_define_method(rb_cNode, "end_byte", rb_node_end_byte, 0);
   rb_define_method(rb_cNode, "==", rb_node_eq, 1);
   rb_define_method(rb_cNode, "hash", rb_node_hash, 0);
   rb_define_method(rb_cNode, "eql?", rb_node_eq, 1);
   rb_define_method(rb_cNode, "descendant_of_type?", rb_node_descendant_of_type, 1);
-
+  rb_define_private_method(rb_cNode, "__to_h__", rb_node_to_h, 1);
   rb_define_method(rb_cNode, "text?", rb_node_text_p, -1);
   rb_define_method(rb_cNode, "type?", rb_node_type_p, -1);
 

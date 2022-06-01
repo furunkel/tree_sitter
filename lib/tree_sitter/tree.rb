@@ -71,16 +71,40 @@ module TreeSitter
       end
     end
 
-    def find_by_byte(goal_byte, parents: false, fields: false, types: false)
-      __find_by_byte__ goal_byte, parents, fields, types
+    def find_by_byte(goal_byte)
+      __find_by_byte__ goal_byte
+    end
+
+    def path_to(goal_byte)
+      __path_to__ goal_byte
     end
 
     def to_h
-      __to_h__
+      root_node.to_h
     end
 
     def cursor
       root_node.cursor
+    end
+
+    class Path
+      def rindex_by_field(field, before: nil)
+        __rindex_by_field__ field, before
+      end
+
+      def rindex_by_type(type, before: nil)
+        __rindex_by_type__ type, before
+      end
+
+      def find_by_type(type, before: nil, return_index: false)
+        __find_by_type__ type, before, return_index
+      end
+    end
+
+    class Query
+      def run(node, start_byte: nil, end_byte: nil, start_point: nil, end_point: nil)
+        __run__(node, start_byte, end_byte, start_point, end_point)
+      end
     end
 
   end

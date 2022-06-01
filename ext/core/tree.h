@@ -27,6 +27,22 @@ typedef struct {
   Language *language;
 } Tree;
 
+typedef struct {
+  TSNode ts_node;
+  TSFieldId field_id;
+} TreePathNode;
+
+typedef struct {
+  TreePathNode *nodes;
+  uint32_t len;
+  VALUE rb_tree;
+} TreePath;
+
+typedef struct {
+  Language *language;
+  TSQuery *ts_query;
+} Query;
+
 void init_tree();
 VALUE rb_new_language(TSLanguage *ts_language);
 
@@ -39,3 +55,22 @@ rb_tree_language_(VALUE self) {
   TypedData_Get_Struct(self, Tree, &tree_type, tree);
   return tree->language;
 }
+
+extern ID id_error;
+
+static inline ID
+language_symbol2id(Language *language, TSSymbol symbol) {
+  if(symbol == ((TSSymbol) -1)) {
+    return id_error;
+  } else {
+    return language->ts_symbol2id[symbol];
+  }
+}
+
+static inline ID
+language_field2id(Language *language, TSFieldId field_id) {
+  return language->ts_field2id[field_id];
+}
+
+bool language_id2field(Language *language, ID id, TSFieldId *field_id);
+bool language_id2symbol(Language *language, ID id, TSSymbol *symbol);

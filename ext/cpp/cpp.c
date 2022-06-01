@@ -12,11 +12,14 @@ void Init_cpp()
 
   VALUE mTreeSitter = rb_const_get(rb_cObject, rb_intern("TreeSitter"));
   VALUE cTree = rb_const_get(mTreeSitter, rb_intern("Tree"));
+  VALUE cQuery = rb_const_get(cTree, rb_intern("Query"));
 
   VALUE rb_cCpp = rb_define_class_under(mTreeSitter, "Cpp", cTree);
+  VALUE rb_cCpp_Query = rb_define_class_under(rb_cCpp, "Query", cQuery);
 
   VALUE rb_cCpp_s = rb_singleton_class(rb_cCpp);
   VALUE rb_language = rb_new_language((TSLanguage *)tree_sitter_cpp());
 
   rb_ivar_set(rb_cCpp, id___language__, rb_language);
+  rb_ivar_set(rb_cCpp_Query, id___language__, rb_language);
 }
