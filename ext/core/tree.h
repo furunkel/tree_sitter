@@ -14,6 +14,8 @@ typedef struct {
 
   st_table *ts_symbol_table;
   ID *ts_symbol2id;
+  size_t field_count;
+  size_t symbol_count;
 
   st_table *ts_field_table;
   ID *ts_field2id;

@@ -165,6 +165,8 @@ rb_new_language(TSLanguage *ts_language)
 
   language->ts_symbol2id = RB_ALLOC_N(ID, symbol_count);
   language->ts_field2id = RB_ALLOC_N(ID, field_count + 1);
+  language->symbol_count = symbol_count;
+  language->field_count = field_count + 1;
 
   for(uint32_t i = 0; i < symbol_count; i++) {
     const char *symbol_name = ts_language_symbol_name(ts_language, (TSSymbol) i);
@@ -186,6 +188,30 @@ rb_new_language(TSLanguage *ts_language)
   return TypedData_Wrap_Struct(rb_cLanguage, &language_type, language);
 }
 
+static VALUE
+rb_language_fields(VALUE self) {
+  Language* language;
+  TypedData_Get_Struct(self, Language, &language_type, language);
+
+  VALUE rb_fields = rb_ary_new_capa(language->field_count);
+  for(size_t i = 0; i < language->field_count; i++) {
+    rb_ary_push(rb_fields, ID2SYM(language->ts_field2id[i]));
+  }
+
+  return rb_fields;
+}
+
+static VALUE
+rb_language_symbols(VALUE self) {
+  Language* language;
+  TypedData_Get_Struct(self, Language, &language_type, language);
+
+  VALUE rb_symbols = rb_ary_new_capa(language->symbol_count);
+  for(size_t i = 0; i < language->symbol_count; i++) {
+    rb_ary_push(rb_symbols, ID2SYM(language->ts_symbol2id[i]));
+  }
+  return rb_symbols;
+}
 
 static VALUE
 rb_tree_alloc(VALUE self)
@@ -842,4 +868,10 @@ init_tree()
     rb_cTreeCursor, "copy", rb_tree_cursor_copy, 0);
 
   rb_cLanguage = rb_define_class_under(rb_mTreeSitter, "Language", rb_cObject);
+
+  rb_define_method(
+    rb_cLanguage, "fields", rb_language_fields, 0);
+
+  rb_define_method(
+    rb_cLanguage, "symbols", rb_language_symbols, 0);
 }
