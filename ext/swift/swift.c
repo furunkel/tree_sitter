@@ -12,11 +12,14 @@ void Init_swift()
 
   VALUE mTreeSitter = rb_const_get(rb_cObject, rb_intern("TreeSitter"));
   VALUE cTree = rb_const_get(mTreeSitter, rb_intern("Tree"));
+  VALUE cQuery = rb_const_get(cTree, rb_intern("Query"));
 
   VALUE rb_cSwift = rb_define_class_under(mTreeSitter, "Swift", cTree);
+  VALUE rb_cSwift_Query = rb_define_class_under(rb_cSwift, "Query", cQuery);
 
   VALUE rb_cSwift_s = rb_singleton_class(rb_cSwift);
   VALUE rb_language = rb_new_language((TSLanguage *)tree_sitter_swift());
 
   rb_ivar_set(rb_cSwift, id___language__, rb_language);
+  rb_ivar_set(rb_cSwift_Query, id___language__, rb_language);
 }

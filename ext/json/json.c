@@ -12,11 +12,14 @@ void Init_json()
 
   VALUE mTreeSitter = rb_const_get(rb_cObject, rb_intern("TreeSitter"));
   VALUE cTree = rb_const_get(mTreeSitter, rb_intern("Tree"));
+  VALUE cQuery = rb_const_get(cTree, rb_intern("Query"));
 
   VALUE rb_cJson = rb_define_class_under(mTreeSitter, "Json", cTree);
+  VALUE rb_cJson_Query = rb_define_class_under(rb_cJson, "Query", cQuery);
 
   VALUE rb_cJson_s = rb_singleton_class(rb_cJson);
   VALUE rb_language = rb_new_language((TSLanguage *)tree_sitter_json());
 
   rb_ivar_set(rb_cJson, id___language__, rb_language);
+  rb_ivar_set(rb_cJson_Query, id___language__, rb_language);
 }

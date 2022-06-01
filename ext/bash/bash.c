@@ -12,11 +12,14 @@ void Init_bash()
 
   VALUE mTreeSitter = rb_const_get(rb_cObject, rb_intern("TreeSitter"));
   VALUE cTree = rb_const_get(mTreeSitter, rb_intern("Tree"));
+  VALUE cQuery = rb_const_get(cTree, rb_intern("Query"));
 
   VALUE rb_cBash = rb_define_class_under(mTreeSitter, "Bash", cTree);
+  VALUE rb_cBash_Query = rb_define_class_under(rb_cBash, "Query", cQuery);
 
   VALUE rb_cBash_s = rb_singleton_class(rb_cBash);
   VALUE rb_language = rb_new_language((TSLanguage *)tree_sitter_bash());
 
   rb_ivar_set(rb_cBash, id___language__, rb_language);
+  rb_ivar_set(rb_cBash_Query, id___language__, rb_language);
 }

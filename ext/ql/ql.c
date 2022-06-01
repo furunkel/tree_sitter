@@ -12,11 +12,14 @@ void Init_ql()
 
   VALUE mTreeSitter = rb_const_get(rb_cObject, rb_intern("TreeSitter"));
   VALUE cTree = rb_const_get(mTreeSitter, rb_intern("Tree"));
+  VALUE cQuery = rb_const_get(cTree, rb_intern("Query"));
 
   VALUE rb_cQl = rb_define_class_under(mTreeSitter, "Ql", cTree);
+  VALUE rb_cQl_Query = rb_define_class_under(rb_cQl, "Query", cQuery);
 
   VALUE rb_cQl_s = rb_singleton_class(rb_cQl);
   VALUE rb_language = rb_new_language((TSLanguage *)tree_sitter_ql());
 
   rb_ivar_set(rb_cQl, id___language__, rb_language);
+  rb_ivar_set(rb_cQl_Query, id___language__, rb_language);
 }
