@@ -2,7 +2,6 @@
 
 #include "ruby.h"
 #include "tree_sitter/api.h"
-#include "core.h"
 
 typedef struct {
   TSTreeCursor ts_tree_cursor;
@@ -42,6 +41,8 @@ typedef struct {
   Language *language;
   TSQuery *ts_query;
 } Query;
+
+#include "node.h"
 
 void init_tree();
 VALUE rb_new_language(TSLanguage *ts_language);

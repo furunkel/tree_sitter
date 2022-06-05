@@ -9,4 +9,5 @@ __attribute__((visibility("default"))) void Init_core()
  
   init_tree();
   init_node();
+  init_misc();
 }

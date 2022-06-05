@@ -10,9 +10,6 @@
 
 #include "tree.h"
 #include "node.h"
-
-#define CSTR2SYM(s) (ID2SYM(rb_intern((s))))
-
-extern VALUE rb_eTreeSitterError;
+#include "misc.h"
 
 void Init_treesitter();

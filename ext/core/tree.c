@@ -216,8 +216,8 @@ rb_new_language(TSLanguage *ts_language)
   language->ts_symbol_table = st_init_numtable();
   language->ts_field_table = st_init_numtable();
 
-  language->ts_symbol2id = RB_ALLOC_N(ID, symbol_count);
-  language->ts_field2id = RB_ALLOC_N(ID, field_count + 1);
+  language->ts_symbol2id = RB_ZALLOC_N(ID, symbol_count);
+  language->ts_field2id = RB_ZALLOC_N(ID, field_count + 1);
   language->symbol_count = symbol_count;
   language->field_count = field_count + 1;
 
@@ -250,7 +250,10 @@ rb_language_fields(VALUE self) {
 
   VALUE rb_fields = rb_ary_new_capa(language->field_count);
   for(size_t i = 0; i < language->field_count; i++) {
-    rb_ary_push(rb_fields, RB_ID2SYM(language->ts_field2id[i]));
+    ID id = language->ts_field2id[i];
+    if(id) {
+      rb_ary_push(rb_fields, RB_ID2SYM(id));
+    }
   }
 
   return rb_fields;
@@ -408,10 +411,6 @@ rb_query_run(VALUE self, VALUE rb_node, VALUE rb_start_byte, VALUE rb_end_byte, 
 
   rb_ensure(rb_query_run_yield, (VALUE) &run_args, rb_query_run_ensure, (VALUE) &run_args);
   return self;
-<<<<<<< HEAD
->>>>>>> a537fb0e2edd4a71547e122bd0267d230ed4357c
-=======
->>>>>>> dcb78ffb591863425b7485eaf3f3c03fba01333c
 }
 
 static VALUE
@@ -453,6 +452,13 @@ rb_tree_language(VALUE self)
 
   VALUE rb_klass = rb_class_of(self);
   VALUE rb_language = rb_ivar_get(rb_klass, id___language__);
+  return rb_language;
+}
+
+static VALUE
+rb_tree_language_s(VALUE self)
+{
+  VALUE rb_language = rb_ivar_get(self, id___language__);
   return rb_language;
 }
 
@@ -1206,6 +1212,7 @@ init_tree()
   rb_define_method(rb_cTree, "detach", rb_tree_detach, 0);
   rb_define_method(rb_cTree, "root_node", rb_tree_root_node, 0);
   rb_define_method(rb_cTree, "language", rb_tree_language, 0);
+  rb_define_singleton_method(rb_cTree, "language", rb_tree_language_s, 0);
 
   rb_define_method(rb_cTree, "__path_to__", rb_tree_path_to, 1);
   rb_define_method(rb_cTree, "__find_by_byte__", rb_tree_find_by_byte, 1);
@@ -1267,8 +1274,4 @@ init_tree()
   VALUE rb_cQuery = rb_define_class_under(rb_cTree, "Query", rb_cObject);
   rb_define_singleton_method(rb_cQuery, "new", rb_query_new, 1);
   rb_define_method(rb_cQuery, "__run__", rb_query_run, 5);
-<<<<<<< HEAD
-=======
-
->>>>>>> dcb78ffb591863425b7485eaf3f3c03fba01333c
 }

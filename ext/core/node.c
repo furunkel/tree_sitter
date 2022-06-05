@@ -52,7 +52,7 @@ static const rb_data_type_t point_type = {
     .flags = RUBY_TYPED_FREE_IMMEDIATELY,
 };
 
-static Tree *
+Tree *
 node_get_tree(AstNode *node) {
   return (Tree *) DATA_PTR(node->rb_tree);
 }
