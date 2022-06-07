@@ -5,16 +5,23 @@
 #include "core.h"
 #include "node.h"
 
-#define SUBTREE_COUNTER_ENTRY_MAX_CHILDREN 256
+#define SUBTREE_COUNTER_ENTRY_MAX_CHILDREN 16
 #define SUBTREE_COUNTER_INIT_CAPA 1024 * 10
+
+typedef struct {
+  uint64_t id;
+  uint16_t field;
+} SubtreeCounterEntryChild;
 
 typedef struct {
   uint16_t type;
   uint16_t text_len;
-  uint16_t count;
+  uint32_t count;
   uint16_t child_count;
+  uint16_t depth;
   uint16_t child_fields[SUBTREE_COUNTER_ENTRY_MAX_CHILDREN];
-  uint32_t child_ids[SUBTREE_COUNTER_ENTRY_MAX_CHILDREN];
+  uint64_t child_ids[SUBTREE_COUNTER_ENTRY_MAX_CHILDREN];
+  SubtreeCounterEntryChild *children;
   char *text;
 } SubtreeCounterEntry;
 
@@ -25,6 +32,14 @@ typedef struct {
   SubtreeCounterEntry **entries_ptrs;
   size_t entries_len;
   size_t entries_capa;
+  VALUE rb_language;
+  uint16_t *types;
+  size_t types_len;
 } SubtreeCounter;
+
+typedef struct {
+  VALUE rb_subtree_counter;
+  SubtreeCounterEntry *entry;
+} SubtreeCounterEntryRb;
 
 void init_misc();

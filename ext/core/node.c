@@ -968,7 +968,7 @@ rb_node_hash(VALUE self) {
 }
 
 static VALUE
-node_to_hash(TSTreeCursor *cursor, TSNode node, Tree* tree, bool include_byte_ranges)
+node_to_hash(TSTreeCursor *cursor, TSNode node, Tree* tree, bool include_byte_ranges, bool include_unnamed)
 {
   VALUE rb_hash = rb_hash_new();
 
@@ -982,10 +982,15 @@ node_to_hash(TSTreeCursor *cursor, TSNode node, Tree* tree, bool include_byte_ra
 
   rb_hash_aset(rb_hash, RB_ID2SYM(id_type), rb_type);
 
-  uint32_t named_child_count = ts_node_named_child_count(node);
+  uint32_t child_count;
+  if(include_unnamed) {
+    child_count = ts_node_child_count(node);
+  } else {
+    child_count = ts_node_named_child_count(node);
+  }
   VALUE rb_children = Qnil;
 
-  if (named_child_count == 0 && tree->rb_input != Qnil) {
+  if (child_count == 0 && tree->rb_input != Qnil) {
     VALUE rb_text = rb_node_text_(node, tree->rb_input);
     rb_hash_aset(rb_hash, RB_ID2SYM(id_text), rb_text);
   } else {
@@ -1001,14 +1006,14 @@ node_to_hash(TSTreeCursor *cursor, TSNode node, Tree* tree, bool include_byte_ra
     rb_hash_aset(rb_hash, RB_ID2SYM(id_field), rb_field_name);
   }
 
-  if (named_child_count > 0) {
-    rb_children = rb_ary_new_capa(named_child_count);
+  if (child_count > 0) {
+    rb_children = rb_ary_new_capa(child_count);
     if(ts_tree_cursor_goto_first_child(cursor)) {
       do {
         TSNode child_node = ts_tree_cursor_current_node(cursor);
         TSTreeCursor child_cursor = ts_tree_cursor_copy(cursor);
-        if(ts_node_is_named(child_node)) {
-          VALUE rb_child_hash = node_to_hash(&child_cursor, child_node, tree, include_byte_ranges);
+        if(include_unnamed || ts_node_is_named(child_node)) {
+          VALUE rb_child_hash = node_to_hash(&child_cursor, child_node, tree, include_byte_ranges, include_unnamed);
           rb_ary_push(rb_children, rb_child_hash);
         }
         ts_tree_cursor_delete(&child_cursor);
@@ -1024,14 +1029,14 @@ node_to_hash(TSTreeCursor *cursor, TSNode node, Tree* tree, bool include_byte_ra
 }
 
 static VALUE
-rb_node_to_h(VALUE self, VALUE rb_byte_ranges)
+rb_node_to_h(VALUE self, VALUE rb_byte_ranges, VALUE rb_unnamed)
 {
   AstNode *node;
   TypedData_Get_Struct(self, AstNode, &node_type, node);
   TSTreeCursor cursor = ts_tree_cursor_new(node->ts_node);
 
   Tree *tree = node_get_tree(node);
-  VALUE rb_hash = node_to_hash(&cursor, node->ts_node, tree, RB_TEST(rb_byte_ranges));
+  VALUE rb_hash = node_to_hash(&cursor, node->ts_node, tree, RB_TEST(rb_byte_ranges), RB_TEST(rb_unnamed));
 
   ts_tree_cursor_delete(&cursor);
   return rb_hash;
@@ -1085,7 +1090,7 @@ void init_node()
   rb_define_method(rb_cNode, "hash", rb_node_hash, 0);
   rb_define_method(rb_cNode, "eql?", rb_node_eq, 1);
   rb_define_method(rb_cNode, "descendant_of_type?", rb_node_descendant_of_type, 1);
-  rb_define_private_method(rb_cNode, "__to_h__", rb_node_to_h, 1);
+  rb_define_private_method(rb_cNode, "__to_h__", rb_node_to_h, 2);
   rb_define_method(rb_cNode, "text?", rb_node_text_p, -1);
   rb_define_method(rb_cNode, "type?", rb_node_type_p, -1);
 
