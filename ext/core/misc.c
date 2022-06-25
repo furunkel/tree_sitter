@@ -645,12 +645,12 @@ static void _rb_str_cat_u16(VALUE rb_str, uint16_t v) {
 }
 
 void
-subtree_counter_entry_to_json(SubtreeCounterEntry *entry, Language *language, VALUE rb_buf, bool raw, bool newline) {
+subtree_counter_entry_to_json(SubtreeCounterEntry *entry, Language *language, VALUE rb_buf, bool type_ids, bool field_ids, bool newline) {
   STR_CAT_STATIC(rb_buf, "{");
 
   {
     STR_CAT_STATIC(rb_buf, "\"type\":");
-    if(raw) {
+    if(type_ids) {
       _rb_str_cat_u16(rb_buf, entry->type);
     } else {
       STR_CAT_STATIC(rb_buf, "\"");
@@ -700,7 +700,7 @@ subtree_counter_entry_to_json(SubtreeCounterEntry *entry, Language *language, VA
         }
 
         if(field_id != 0) {
-          if(raw) {
+          if(field_ids) {
             _rb_str_cat_u16(rb_buf, field_id);
           } else {
             STR_CAT_STATIC(rb_buf, "\"");
@@ -731,7 +731,7 @@ subtree_counter_entry_to_json(SubtreeCounterEntry *entry, Language *language, VA
 }
 
 static VALUE
-rb_subtree_counter_to_json(VALUE self, VALUE rb_raw, VALUE rb_jsonl) {
+rb_subtree_counter_to_json(VALUE self, VALUE rb_type_ids, VALUE rb_field_ids, VALUE rb_jsonl) {
   SubtreeCounter *subtree_counter;
   TypedData_Get_Struct(self, SubtreeCounter, &subtree_counter_type, subtree_counter);
 
@@ -747,7 +747,7 @@ rb_subtree_counter_to_json(VALUE self, VALUE rb_raw, VALUE rb_jsonl) {
   }
 
   for(size_t i = 0; i < subtree_counter->entries_len; i++) {
-    subtree_counter_entry_to_json(subtree_counter->entries_ptrs[i], language, rb_buf, RTEST(rb_raw), jsonl);
+    subtree_counter_entry_to_json(subtree_counter->entries_ptrs[i], language, rb_buf, RTEST(rb_type_ids), RTEST(rb_field_ids), jsonl);
 
     if(!jsonl && i < subtree_counter->entries_len - 1) {
       STR_CAT_STATIC(rb_buf, ",");
@@ -762,7 +762,7 @@ rb_subtree_counter_to_json(VALUE self, VALUE rb_raw, VALUE rb_jsonl) {
 }
 
 static VALUE
-rb_subtree_counter_entry_to_json(VALUE self, VALUE rb_raw) {
+rb_subtree_counter_entry_to_json(VALUE self, VALUE rb_type_ids, VALUE rb_field_ids) {
   SubtreeCounterEntryRb *subtree_counter_entry;
   TypedData_Get_Struct(self, SubtreeCounterEntryRb, &subtree_counter_entry_type, subtree_counter_entry);
   SubtreeCounterEntry *entry = subtree_counter_entry->entry;
@@ -774,7 +774,7 @@ rb_subtree_counter_entry_to_json(VALUE self, VALUE rb_raw) {
   TypedData_Get_Struct(subtree_counter->rb_language, Language, &language_type, language);
 
   VALUE rb_buf = rb_str_buf_new(128);
-  subtree_counter_entry_to_json(entry, language, rb_buf, RTEST(rb_raw), false);
+  subtree_counter_entry_to_json(entry, language, rb_buf, RTEST(rb_type_ids), RTEST(rb_field_ids), false);
 
   return rb_buf;
 }
@@ -792,12 +792,12 @@ init_misc() {
   rb_define_method(rb_cSubtreeCounter, "size", rb_subtree_counter_size, 0);
   rb_define_method(rb_cSubtreeCounter, "[]", rb_subtree_counter_aref, 1);
   rb_define_method(rb_cSubtreeCounter, "each", rb_subtree_counter_each, 0);
-  rb_define_method(rb_cSubtreeCounter, "__to_json__", rb_subtree_counter_to_json, 2);
+  rb_define_method(rb_cSubtreeCounter, "__to_json__", rb_subtree_counter_to_json, 3);
 
   rb_define_method(rb_cSubtreeCounterEntry, "count", rb_subtree_counter_entry_count, 0);
   rb_define_method(rb_cSubtreeCounterEntry, "text", rb_subtree_counter_entry_text, 0);
   rb_define_method(rb_cSubtreeCounterEntry, "type", rb_subtree_counter_entry_type, 0);
   rb_define_method(rb_cSubtreeCounterEntry, "child_ids", rb_subtree_counter_entry_child_ids, 0);
   rb_define_method(rb_cSubtreeCounterEntry, "child_fields", rb_subtree_counter_entry_child_fields, 0);
-  rb_define_method(rb_cSubtreeCounterEntry, "__to_json__", rb_subtree_counter_entry_to_json, 1);
+  rb_define_method(rb_cSubtreeCounterEntry, "__to_json__", rb_subtree_counter_entry_to_json, 2);
 }
