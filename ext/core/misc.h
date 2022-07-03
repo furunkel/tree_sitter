@@ -25,6 +25,10 @@ typedef struct {
   char *text;
 } SubtreeCounterEntry;
 
+typedef struct {
+  SubtreeCounterEntry *entry;
+  uint64_t id;
+} SubtreeCounterEntryWithId;
 
 typedef struct {
   st_table *id_map;

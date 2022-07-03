@@ -645,12 +645,18 @@ static void _rb_str_cat_u16(VALUE rb_str, uint16_t v) {
 }
 
 void
-subtree_counter_entry_to_json(SubtreeCounterEntry *entry, Language *language, VALUE rb_buf, bool type_ids, bool field_ids, bool newline) {
+subtree_counter_entry_to_json(SubtreeCounterEntry *entry, Language *language, uint64_t id, VALUE rb_buf, bool output_id, bool type_id, bool field_ids, bool newline) {
   STR_CAT_STATIC(rb_buf, "{");
+
+  if(output_id) {
+    STR_CAT_STATIC(rb_buf, "\"id\":");
+    _rb_str_cat_u64(rb_buf, id);
+    STR_CAT_STATIC(rb_buf, ",");
+  }
 
   {
     STR_CAT_STATIC(rb_buf, "\"type\":");
-    if(type_ids) {
+    if(type_id) {
       _rb_str_cat_u16(rb_buf, entry->type);
     } else {
       STR_CAT_STATIC(rb_buf, "\"");
@@ -730,39 +736,93 @@ subtree_counter_entry_to_json(SubtreeCounterEntry *entry, Language *language, VA
   }
 }
 
+static int
+subtree_counter_entry_with_id_cmp(const void* a, const void* b)
+{
+  SubtreeCounterEntryWithId *entry_a = (SubtreeCounterEntryWithId *) a;
+  SubtreeCounterEntryWithId *entry_b = (SubtreeCounterEntryWithId *) b;
+
+  int c = entry_a->entry->depth - entry_b->entry->depth;
+  if(c == 0) {
+    return entry_a->id < entry_b->id ? -1 : 1;
+  } else {
+    return c;
+  }
+}
+
 static VALUE
-rb_subtree_counter_to_json(VALUE self, VALUE rb_type_ids, VALUE rb_field_ids, VALUE rb_jsonl) {
+rb_subtree_counter_to_jsonl(VALUE self, VALUE rb_ids, VALUE rb_type_ids, VALUE rb_field_ids, VALUE rb_sort, VALUE rb_separate) {
   SubtreeCounter *subtree_counter;
   TypedData_Get_Struct(self, SubtreeCounter, &subtree_counter_type, subtree_counter);
 
   Language* language;
   TypedData_Get_Struct(subtree_counter->rb_language, Language, &language_type, language);
 
-  VALUE rb_buf = rb_str_buf_new(128 * subtree_counter->entries_len);
+  VALUE retval;
 
-  bool jsonl = RTEST(rb_jsonl);
+  // bool jsonl = RTEST(rb_jsonl);
+  bool sort = RTEST(rb_sort);
+  bool separate = RTEST(rb_separate);
+  SubtreeCounterEntryWithId *sorted_entries;
 
-  if(!jsonl) {
-    STR_CAT_STATIC(rb_buf, "[");
-  }
+  bool need_sort = sort || separate;
 
-  for(size_t i = 0; i < subtree_counter->entries_len; i++) {
-    subtree_counter_entry_to_json(subtree_counter->entries_ptrs[i], language, rb_buf, RTEST(rb_type_ids), RTEST(rb_field_ids), jsonl);
-
-    if(!jsonl && i < subtree_counter->entries_len - 1) {
-      STR_CAT_STATIC(rb_buf, ",");
+  if(need_sort) {
+    sorted_entries = ALLOC_N(SubtreeCounterEntryWithId, subtree_counter->entries_len);
+    for(size_t i = 0; i < subtree_counter->entries_len; i++) {
+      sorted_entries[i].entry = subtree_counter->entries_ptrs[i];
+      sorted_entries[i].id = i;
     }
+
+    qsort(sorted_entries, subtree_counter->entries_len, sizeof(SubtreeCounterEntryWithId), subtree_counter_entry_with_id_cmp);
   }
 
-  if(!jsonl) {
-    STR_CAT_STATIC(rb_buf, "]");
+  if(separate) {
+    retval = rb_ary_new();
+    VALUE rb_buf = rb_str_buf_new(128 * 100);
+    SubtreeCounterEntry *prev_entry = NULL;
+
+    for(size_t i = 0; i < subtree_counter->entries_len; i++) {
+      SubtreeCounterEntry *entry = sorted_entries[i].entry;
+      if(prev_entry && prev_entry->depth != entry->depth) {
+        rb_ary_push(retval, rb_buf);
+        rb_buf = rb_str_buf_new(128 * 100);
+      }
+
+      size_t id = sorted_entries[i].id;
+      subtree_counter_entry_to_json(entry, language, id, rb_buf, true /* include id */, RTEST(rb_type_ids), RTEST(rb_field_ids), true /* add final newline */);
+
+      prev_entry = entry;
+    }
+  } else {
+    VALUE rb_buf = rb_str_buf_new(128 * subtree_counter->entries_len);
+    for(size_t i = 0; i < subtree_counter->entries_len; i++) {
+      SubtreeCounterEntry *entry;
+      size_t id;
+
+      if(sort) {
+        entry = sorted_entries[i].entry;
+        id = sorted_entries[i].id;
+      } else {
+        entry = subtree_counter->entries_ptrs[i];
+        id = i;
+      }
+
+      subtree_counter_entry_to_json(entry, language, id, rb_buf, RTEST(rb_ids), RTEST(rb_type_ids), RTEST(rb_field_ids), true /* add final newline */);
+    }
+    retval = rb_buf;
   }
 
-  return rb_buf;
+
+  if(need_sort) {
+    xfree(sorted_entries);
+  }
+
+  return retval;
 }
 
 static VALUE
-rb_subtree_counter_entry_to_json(VALUE self, VALUE rb_type_ids, VALUE rb_field_ids) {
+rb_subtree_counter_entry_to_json(VALUE self, VALUE rb_type_id, VALUE rb_field_ids) {
   SubtreeCounterEntryRb *subtree_counter_entry;
   TypedData_Get_Struct(self, SubtreeCounterEntryRb, &subtree_counter_entry_type, subtree_counter_entry);
   SubtreeCounterEntry *entry = subtree_counter_entry->entry;
@@ -774,7 +834,7 @@ rb_subtree_counter_entry_to_json(VALUE self, VALUE rb_type_ids, VALUE rb_field_i
   TypedData_Get_Struct(subtree_counter->rb_language, Language, &language_type, language);
 
   VALUE rb_buf = rb_str_buf_new(128);
-  subtree_counter_entry_to_json(entry, language, rb_buf, RTEST(rb_type_ids), RTEST(rb_field_ids), false);
+  subtree_counter_entry_to_json(entry, language, 0, rb_buf, false, RTEST(rb_type_id), RTEST(rb_field_ids), false);
 
   return rb_buf;
 }
@@ -792,7 +852,7 @@ init_misc() {
   rb_define_method(rb_cSubtreeCounter, "size", rb_subtree_counter_size, 0);
   rb_define_method(rb_cSubtreeCounter, "[]", rb_subtree_counter_aref, 1);
   rb_define_method(rb_cSubtreeCounter, "each", rb_subtree_counter_each, 0);
-  rb_define_method(rb_cSubtreeCounter, "__to_json__", rb_subtree_counter_to_json, 3);
+  rb_define_method(rb_cSubtreeCounter, "__to_jsonl__", rb_subtree_counter_to_jsonl, 5);
 
   rb_define_method(rb_cSubtreeCounterEntry, "count", rb_subtree_counter_entry_count, 0);
   rb_define_method(rb_cSubtreeCounterEntry, "text", rb_subtree_counter_entry_text, 0);
