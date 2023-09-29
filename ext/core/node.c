@@ -1043,7 +1043,7 @@ rb_node_to_h(VALUE self, VALUE rb_byte_ranges, VALUE rb_unnamed)
 }
 
 
-void init_node()
+void init_node(void)
 {
   VALUE rb_mTreeSitter = rb_define_module("TreeSitter");
 
@@ -1054,6 +1054,7 @@ void init_node()
   id_text = rb_intern("text");
 
   rb_cNode = rb_define_class_under(rb_mTreeSitter, "Node", rb_cObject);
+  rb_undef_alloc_func(rb_cNode);
   rb_define_method(rb_cNode, "to_s", rb_node_to_s, 0);
   rb_define_method(rb_cNode, "type", rb_node_type, 0);
   rb_define_method(rb_cNode, "tree", rb_node_tree, 0);
@@ -1074,8 +1075,11 @@ void init_node()
   rb_define_method(rb_cNode, "has_ancestor_path?", rb_node_has_ancestor_path, -1);
   rb_define_method(rb_cNode, "named_child_at", rb_node_named_child_at, 1);
   rb_define_method(rb_cNode, "named_child_at?", rb_node_named_child_at_p, 2);
-  rb_define_method(rb_cNode, "start_position", rb_node_start_point, 0);
-  rb_define_method(rb_cNode, "end_position", rb_node_end_point, 0);
+  rb_define_method(rb_cNode, "start_point", rb_node_start_point, 0);
+  rb_define_method(rb_cNode, "end_point", rb_node_end_point, 0);
+  rb_define_alias(rb_cNode, "start_position", "start_point");
+  rb_define_alias(rb_cNode, "end_position", "end_point");
+
   rb_define_method(rb_cNode, "children", rb_node_children, 0);
   rb_define_method(rb_cNode, "each_child", rb_node_each_child, 0);
   rb_define_method(rb_cNode, "each_child_with_field_name", rb_node_each_child_with_field_name, 0);
@@ -1095,6 +1099,7 @@ void init_node()
   rb_define_method(rb_cNode, "type?", rb_node_type_p, -1);
 
   rb_cPoint = rb_define_class_under(rb_cNode, "Point", rb_cObject);
+  rb_undef_alloc_func(rb_cPoint);
   rb_define_method(rb_cPoint, "row", rb_point_row, 0);
   rb_define_method(rb_cPoint, "column", rb_point_column, 0);
 }

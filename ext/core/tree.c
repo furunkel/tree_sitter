@@ -1251,6 +1251,7 @@ init_tree()
     rb_cTreeCursor, "copy", rb_tree_cursor_copy, 0);
 
   rb_cLanguage = rb_define_class_under(rb_mTreeSitter, "Language", rb_cObject);
+  rb_undef_alloc_func(rb_cLanguage);
 
   rb_define_method(
     rb_cLanguage, "fields", rb_language_fields, 0);
@@ -1273,5 +1274,6 @@ init_tree()
 
   VALUE rb_cQuery = rb_define_class_under(rb_cTree, "Query", rb_cObject);
   rb_define_singleton_method(rb_cQuery, "new", rb_query_new, 1);
+  rb_undef_alloc_func(rb_cQuery);
   rb_define_method(rb_cQuery, "__run__", rb_query_run, 5);
 }
