@@ -102,8 +102,8 @@ module TreeSitter
     end
 
     class Query
-      def run(node, start_byte: nil, end_byte: nil, start_point: nil, end_point: nil)
-        __run__(node, start_byte, end_byte, start_point, end_point)
+      def run(node, start_byte: nil, end_byte: nil, start_point: nil, end_point: nil, &block)
+        __run__(node, start_byte, end_byte, start_point, end_point, &block)
       end
     end
 

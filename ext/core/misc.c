@@ -165,6 +165,9 @@ symbol_cmp(const void* a, const void* b)
 
 static bool
 subtree_counter_use_type(SubtreeCounter *subtree_counter, uint16_t symbol) {
+  if(subtree_counter->types_len == -1) {
+    return true;
+  }
   return bsearch(&symbol, subtree_counter->types, subtree_counter->types_len, sizeof(uint16_t), symbol_cmp) != NULL;
 }
 
@@ -176,22 +179,25 @@ rb_subtree_counter_initialize(VALUE self, VALUE rb_language, VALUE rb_types) {
   Language* language;
   TypedData_Get_Struct(rb_language, Language, &language_type, language);
 
-  size_t types_len = RARRAY_LEN(rb_types);
-  subtree_counter->types= RB_ALLOC_N(uint16_t, types_len);
+  if(RB_NIL_P(rb_types)) {
+    subtree_counter->types_len = -1;
+  } else {
+    Check_Type(rb_types, T_ARRAY);
+    ssize_t types_len = (ssize_t) RARRAY_LEN(rb_types);
+    subtree_counter->types= RB_ALLOC_N(uint16_t, types_len);
 
-  for(size_t i = 0; i < types_len; i++) {
-    VALUE rb_symbol = RARRAY_AREF(rb_types, i);
-    TSSymbol symbol;
-    if(language_id2symbol(language, RB_SYM2ID(rb_symbol), &symbol)) {
-      subtree_counter->types[i] = symbol;
-    } else {
-      rb_raise(rb_eArgError, "invalid symbol %"PRIsVALUE"", rb_symbol);
+    for(ssize_t i = 0; i < types_len; i++) {
+      VALUE rb_symbol = RARRAY_AREF(rb_types, i);
+      TSSymbol symbol;
+      if(language_id2symbol(language, RB_SYM2ID(rb_symbol), &symbol)) {
+        subtree_counter->types[i] = symbol;
+      } else {
+        rb_raise(rb_eArgError, "invalid symbol %"PRIsVALUE"", rb_symbol);
+      }
     }
+    qsort(subtree_counter->types, types_len, sizeof(uint16_t), symbol_cmp);
+    subtree_counter->types_len = types_len;
   }
-
-  qsort(subtree_counter->types, types_len, sizeof(uint16_t), symbol_cmp);
-
-  subtree_counter->types_len = types_len;
 
   subtree_counter->rb_language = rb_language;
   return self;
@@ -233,6 +239,7 @@ copy_text(SubtreeCounterEntry *entry, TSNode ts_node, Tree *tree) {
   entry->text_len = text_len;
 
   if(text_len == 0) {
+    entry->text = NULL;
     return;
   }
 
@@ -290,6 +297,8 @@ add_subtrees_(SubtreeCounter *subtree_counter, TSTreeCursor *cursor, TSNode node
   SubtreeCounterEntry *key_entry = RB_ALLOC(SubtreeCounterEntry);
   key_entry->child_count = 0;
   key_entry->children = NULL;
+  key_entry->text = NULL;
+  key_entry->text_len = 0;
   uint16_t node_type = ts_node_symbol(node);
   uint16_t max_child_depth = 0;
 
@@ -344,9 +353,6 @@ add_subtrees_(SubtreeCounter *subtree_counter, TSTreeCursor *cursor, TSNode node
   if(child_count == 0) {
     //FIXME: create explicit list of which types to have text
     copy_text(key_entry, node, tree);
-  } else {
-    key_entry->text = NULL;
-    key_entry->text_len = 0;
   }
 
   UpdateArg update_arg = {
@@ -381,6 +387,10 @@ static VALUE
 rb_subtree_counter_add(VALUE self, VALUE rb_node) {
   SubtreeCounter *subtree_counter;
   TypedData_Get_Struct(self, SubtreeCounter, &subtree_counter_type, subtree_counter);
+
+  // if(!RB_NIL_P(rb_added_ids)) {
+  //   Check_Type(rb_added_ids, T_ARRAY);
+  // }
 
   AstNode *node;
   TypedData_Get_Struct(rb_node, AstNode, &node_type, node);
@@ -487,6 +497,14 @@ rb_subtree_counter_entry_count(VALUE self) {
   TypedData_Get_Struct(self, SubtreeCounterEntryRb, &subtree_counter_entry_type, subtree_counter_entry);
 
   return UINT2NUM(subtree_counter_entry->entry->count);
+}
+
+static VALUE
+rb_subtree_counter_entry_depth(VALUE self) {
+  SubtreeCounterEntryRb *subtree_counter_entry;
+  TypedData_Get_Struct(self, SubtreeCounterEntryRb, &subtree_counter_entry_type, subtree_counter_entry);
+
+  return UINT2NUM(subtree_counter_entry->entry->depth);
 }
 
 static VALUE
@@ -855,6 +873,7 @@ init_misc() {
   rb_define_method(rb_cSubtreeCounter, "__to_jsonl__", rb_subtree_counter_to_jsonl, 5);
 
   rb_define_method(rb_cSubtreeCounterEntry, "count", rb_subtree_counter_entry_count, 0);
+  rb_define_method(rb_cSubtreeCounterEntry, "depth", rb_subtree_counter_entry_depth, 0);
   rb_define_method(rb_cSubtreeCounterEntry, "text", rb_subtree_counter_entry_text, 0);
   rb_define_method(rb_cSubtreeCounterEntry, "type", rb_subtree_counter_entry_type, 0);
   rb_define_method(rb_cSubtreeCounterEntry, "child_ids", rb_subtree_counter_entry_child_ids, 0);

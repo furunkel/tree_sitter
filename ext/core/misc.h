@@ -38,7 +38,7 @@ typedef struct {
   size_t entries_capa;
   VALUE rb_language;
   uint16_t *types;
-  size_t types_len;
+  ssize_t types_len;
 } SubtreeCounter;
 
 typedef struct {

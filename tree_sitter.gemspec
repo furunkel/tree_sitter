@@ -29,6 +29,7 @@ Gem::Specification.new do |spec|
   spec.bindir = "exe"
   spec.executables = spec.files.grep(%r{\Aexe/}) { |f| File.basename(f) }
   spec.require_paths = ["lib"]
+  spec.extensions = Dir["ext/**/extconf.rb"]
 
   # Uncomment to register a new dependency of your gem
   spec.add_development_dependency "rake-compiler"
