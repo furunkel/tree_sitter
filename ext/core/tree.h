@@ -75,3 +75,4 @@ language_field2id(Language *language, TSFieldId field_id) {
 
 bool language_id2field(Language *language, ID id, TSFieldId *field_id);
 bool language_id2symbol(Language *language, ID id, TSSymbol *symbol);
+void rb_tree_check_attached(Tree *tree);

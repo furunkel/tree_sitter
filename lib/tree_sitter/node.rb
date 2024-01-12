@@ -21,5 +21,9 @@ module TreeSitter
       text = self.text&.then { %(#{_1.inspect} )}
       "#<#{self.class}: #{text}#{type} (#{byte_range.inspect})>"
     end
+
+    def tokenize(whitespace: false)
+      __tokenize__(whitespace)
+    end
   end
 end

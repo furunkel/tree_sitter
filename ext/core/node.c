@@ -1,11 +1,14 @@
 #include "node.h"
 #include "tree_sitter/api.h"
+#include <stdint.h>
+#include <stdlib.h>
 
 // #undef NDEBUG
 // #include <assert.h>
 
 VALUE rb_cNode;
 VALUE rb_cPoint;
+VALUE rb_cToken;
 
 static ID id_type;
 static ID id_byte_range;
@@ -13,8 +16,7 @@ static ID id_children;
 static ID id_field;
 static ID id_text;
 
-static void node_free(void *n)
-{
+static void node_free(void *n) {
   xfree(n);
 }
 
@@ -23,9 +25,17 @@ static void node_mark(void *n) {
   rb_gc_mark(node->rb_tree);
 }
 
-void point_free(void *p)
-{
+static void token_mark(void *t) {
+  Token *token = (Token *) t;
+  rb_gc_mark(token->rb_tree);
+}
+
+void point_free(void *p) {
   xfree(p);
+}
+
+static void token_free(void *t) {
+  xfree(t);
 }
 
 extern const rb_data_type_t tree_type;
@@ -46,6 +56,17 @@ static const rb_data_type_t point_type = {
     .function = {
         .dmark = NULL,
         .dfree = point_free,
+        .dsize = NULL,
+    },
+    .data = NULL,
+    .flags = RUBY_TYPED_FREE_IMMEDIATELY,
+};
+
+static const rb_data_type_t token_type = {
+    .wrap_struct_name = "Token",
+    .function = {
+        .dmark = token_mark,
+        .dfree = token_free,
         .dsize = NULL,
     },
     .data = NULL,
@@ -87,6 +108,7 @@ rb_node_to_s(VALUE self)
   TypedData_Get_Struct(self, AstNode, &node_type, node);
   return rb_str_new_cstr(ts_node_string(node->ts_node));
 }
+
 
 /*
  * Public: The node type.
@@ -145,6 +167,13 @@ rb_new_point(TSPoint ts_point) {
   Point *point = RB_ALLOC(Point);
   point->ts_point = ts_point;
   return TypedData_Wrap_Struct(rb_cPoint, &point_type, point);
+}
+
+static VALUE
+rb_new_token(Token orig_token) {
+  Token *token = RB_ALLOC(Token);
+  *token = orig_token;
+  return TypedData_Wrap_Struct(rb_cToken, &token_type, token);
 }
 
 /*
@@ -781,7 +810,7 @@ rb_point_point_(VALUE self) {
   return point->ts_point;
 }
 
-static void
+void
 rb_tree_check_attached(Tree *tree) {
   if(NIL_P(tree->rb_input)) {
     rb_raise(rb_eTreeSitterError, "no input attached");
@@ -789,25 +818,77 @@ rb_tree_check_attached(Tree *tree) {
 }
 
 static void
-rb_node_check_input_range(uint32_t start_byte, uint32_t end_byte, size_t input_len) {
+rb_attached_tree_check_range(uint32_t start_byte, uint32_t end_byte, size_t input_len) {
   if(start_byte >= input_len || end_byte > input_len) {
     rb_raise(rb_eRuntimeError, "text range exceeds input length (%d-%d > %zu)", start_byte, end_byte, input_len);
   }
 }
 
-VALUE rb_node_text_(TSNode ts_node, VALUE rb_input) {
-  uint32_t start_byte = ts_node_start_byte(ts_node);
-  uint32_t end_byte = ts_node_end_byte(ts_node);
+static bool
+rb_attached_tree_is_whitespace_(Tree *tree, uint32_t start_byte, uint32_t end_byte) {
+  rb_tree_check_attached(tree);
+  if(start_byte == end_byte) {
+    return false;
+  }
+
+  const char *input = RSTRING_PTR(tree->rb_input);
+  size_t input_len = RSTRING_LEN(tree->rb_input);
+
+  rb_attached_tree_check_range(start_byte, end_byte, input_len);
+
+  for(size_t i = start_byte; i < end_byte; i++) {
+    if(!rb_isspace(input[i])) return false;
+  }
+  return true;
+}
+
+static VALUE
+rb_attached_tree_text(Tree *tree, uint32_t start_byte, uint32_t end_byte) {
+  rb_tree_check_attached(tree);
 
   if(start_byte == end_byte) {
     return rb_str_new("", 0);
   }
 
+  VALUE rb_input = tree->rb_input;
   const char *input = RSTRING_PTR(rb_input);
   size_t input_len = RSTRING_LEN(rb_input);
 
-  rb_node_check_input_range(start_byte, end_byte, input_len);
+  rb_attached_tree_check_range(start_byte, end_byte, input_len);
   return rb_str_new(input + start_byte, end_byte - start_byte);
+}
+
+static VALUE
+rb_attached_tree_text_p(Tree *tree, uint32_t start_byte, uint32_t end_byte, int argc, VALUE *argv) {
+  rb_tree_check_attached(tree);
+  VALUE rb_input = tree->rb_input;
+
+  for(int i = 0; i < argc; i++) {
+    VALUE rb_text = argv[i];
+    if(rb_type(rb_text) == T_STRING) {
+      size_t text_len = RSTRING_LEN(rb_text);
+
+      if(end_byte - start_byte != text_len) continue;
+      if(start_byte == end_byte && text_len == 0) return Qtrue;
+
+      const char *input = RSTRING_PTR(rb_input);
+      size_t input_len = RSTRING_LEN(rb_input);
+
+      rb_attached_tree_check_range(start_byte, end_byte, input_len);
+      if(!rb_memcmp(input + start_byte, RSTRING_PTR(rb_text), end_byte - start_byte)) {
+        return Qtrue;
+      }
+    }
+  }
+  return Qfalse;
+}
+
+
+VALUE rb_node_text_(TSNode ts_node, Tree *tree) {
+  uint32_t start_byte = ts_node_start_byte(ts_node);
+  uint32_t end_byte = ts_node_end_byte(ts_node);
+
+  return rb_attached_tree_text(tree, start_byte, end_byte);
 }
 
 static VALUE
@@ -820,10 +901,208 @@ rb_node_text(VALUE self)
   TypedData_Get_Struct(node->rb_tree, Tree, &tree_type, tree);
 
   rb_tree_check_attached(tree);
-  VALUE rb_text = rb_node_text_(node->ts_node, tree->rb_input);
+  VALUE rb_text = rb_node_text_(node->ts_node, tree);
 
   return rb_text;
 }
+
+typedef struct TokenArray {
+  Token *data;
+  size_t len;
+  size_t capa;
+} TokenArray;
+
+static void
+add_token(TokenArray *tokens, Token token) {
+  if(tokens->len >= tokens->capa) {
+    size_t new_capa = 2 * tokens->capa;
+    RB_REALLOC_N(tokens->data, Token, new_capa);
+    tokens->capa = new_capa;
+  }
+  tokens->data[tokens->len] = token;
+  tokens->len++;
+}
+
+#ifdef NDEBUG
+#undef NDEBUG
+#endif
+
+void node_tokenize(TSTreeCursor *cursor, TSNode node, VALUE rb_tree, Tree *tree, TokenArray *tokens, bool include_whitespace) {
+  uint32_t child_count = ts_node_child_count(node);
+
+  uint32_t start_byte = ts_node_start_byte(node);
+  uint32_t end_byte = ts_node_end_byte(node);
+
+  uint32_t cur_byte = start_byte;
+
+  if (child_count > 0) {
+    if(ts_tree_cursor_goto_first_child(cursor)) {
+      TSNode child_node;
+      uint32_t child_end_byte;
+      do {
+        child_node = ts_tree_cursor_current_node(cursor);
+        uint32_t child_start_byte = ts_node_start_byte(child_node);
+        child_end_byte = ts_node_end_byte(child_node);
+        assert(child_start_byte >= start_byte);
+
+        if(child_start_byte != cur_byte) {
+          Token token = {
+            .ts_node = node,
+            .start_byte = cur_byte,
+            .end_byte = child_start_byte,
+            .rb_tree = rb_tree,
+            .implicit = true
+          };
+          if(include_whitespace || !rb_attached_tree_is_whitespace_(tree, token.start_byte, token.end_byte)) {
+            add_token(tokens, token);
+          }
+        }
+        cur_byte = child_end_byte;
+        TSTreeCursor child_cursor = ts_tree_cursor_copy(cursor);
+        node_tokenize(&child_cursor, child_node, rb_tree, tree, tokens, include_whitespace);
+        ts_tree_cursor_delete(&child_cursor);
+      } while(ts_tree_cursor_goto_next_sibling(cursor));
+
+      // now at last child
+      assert(child_end_byte <= end_byte);
+      if(child_end_byte != end_byte) {
+        Token token = {
+          .ts_node = node,
+          .start_byte = child_end_byte,
+          .end_byte = end_byte,
+          .rb_tree = rb_tree,
+          .implicit = true
+        };
+        if(include_whitespace || !rb_attached_tree_is_whitespace_(tree, token.start_byte, token.end_byte)) {
+          add_token(tokens, token);
+        }
+      }
+    }
+  } else {
+    Token token = {
+      .ts_node = node,
+      .start_byte = start_byte,
+      .end_byte = end_byte,
+      .rb_tree = rb_tree,
+      .implicit = false,
+    };
+    add_token(tokens, token);
+  }
+}
+
+// static int sort_token(const void *a, const void *b)
+// {
+//   Token *token_a = (Token *) a;
+//   Token *token_b = (Token *) b;
+
+//   int cmp = token_a->start_byte - token_b->start_byte;
+//   if(cmp == 0) return (token_b->end_byte - token_a->end_byte);
+//   return cmp;
+// }
+
+static VALUE
+rb_node_tokenize(VALUE self, VALUE rb_whitespace)
+{
+  AstNode *node;
+  TypedData_Get_Struct(self, AstNode, &node_type, node);
+
+  Tree *tree;
+  TypedData_Get_Struct(node->rb_tree, Tree, &tree_type, tree);
+
+  rb_tree_check_attached(tree);
+
+  bool whitespace = RB_TEST(rb_whitespace);
+
+  TSTreeCursor cursor = ts_tree_cursor_new(node->ts_node);
+
+  TokenArray tokens = {
+    .capa = 256,
+    .len = 0,
+  };
+  tokens.data = RB_ZALLOC_N(Token, tokens.capa);
+  node_tokenize(&cursor, node->ts_node, node->rb_tree, tree, &tokens, whitespace);
+
+  VALUE rb_tokens = rb_ary_new_capa(tokens.len);
+
+  // qsort(tokens.data, sizeof(Token), tokens.len, sort_tokens);
+  for(size_t i = 0; i < tokens.len; i++) {
+    rb_ary_push(rb_tokens, rb_new_token(tokens.data[i]));
+  }
+
+  xfree(tokens.data);
+
+  ts_tree_cursor_delete(&cursor);
+  return rb_tokens;
+}
+
+static VALUE
+rb_token_text(VALUE self)
+{
+  Token *token;
+  TypedData_Get_Struct(self, Token, &token_type, token);
+
+  Tree *tree;
+  TypedData_Get_Struct(token->rb_tree, Tree, &tree_type, tree);
+
+  VALUE rb_text = rb_attached_tree_text(tree, token->start_byte, token->end_byte);
+  return rb_text;
+}
+
+static VALUE
+rb_token_implicit_p(VALUE self)
+{
+  Token *token;
+  TypedData_Get_Struct(self, Token, &token_type, token);
+
+  return token->implicit ? Qtrue : Qfalse;
+}
+
+static VALUE
+rb_token_whitespace_p(VALUE self)
+{
+  Token *token;
+  TypedData_Get_Struct(self, Token, &token_type, token);
+
+  Tree *tree;
+  TypedData_Get_Struct(token->rb_tree, Tree, &tree_type, tree);
+
+  bool is_whitespace = rb_attached_tree_is_whitespace_(tree, token->start_byte, token->end_byte);
+
+  return is_whitespace ? Qtrue : Qfalse;
+}
+
+static VALUE
+rb_token_byte_range(VALUE self) {
+  Token *token;
+  TypedData_Get_Struct(self, Token, &token_type, token);
+
+  uint32_t start_byte = token->start_byte;
+  uint32_t end_byte = token->end_byte;
+  return rb_range_new(INT2FIX(start_byte), INT2FIX(end_byte - 1), FALSE);
+}
+
+static VALUE
+rb_token_node(VALUE self) {
+  Token *token;
+  TypedData_Get_Struct(self, Token, &token_type, token);
+
+  return rb_new_node(token->rb_tree, token->ts_node);
+}
+
+static VALUE
+rb_token_start_byte(VALUE self) {
+  Token *token;
+  TypedData_Get_Struct(self, Token, &token_type, token);
+  return INT2FIX(token->start_byte);
+}
+
+static VALUE
+rb_token_end_byte(VALUE self) {
+  Token *token;
+  TypedData_Get_Struct(self, Token, &token_type, token);
+  return INT2FIX(token->end_byte);
+}
+
 
 static VALUE
 rb_node_text_starts_with_p(VALUE self, VALUE rb_prefix) {
@@ -851,6 +1130,7 @@ rb_node_text_starts_with_p(VALUE self, VALUE rb_prefix) {
   return Qfalse;
 }
 
+
 static VALUE
 rb_node_text_p(int argc, VALUE *argv, VALUE self)
 {
@@ -860,32 +1140,11 @@ rb_node_text_p(int argc, VALUE *argv, VALUE self)
   Tree *tree;
   TypedData_Get_Struct(node->rb_tree, Tree, &tree_type, tree);
 
-  rb_tree_check_attached(tree);
-  VALUE rb_input = tree->rb_input;
-
   TSNode ts_node = node->ts_node;
   uint32_t start_byte = ts_node_start_byte(ts_node);
   uint32_t end_byte = ts_node_end_byte(ts_node);
 
-  for(int i = 0; i < argc; i++) {
-    VALUE rb_text = argv[i];
-    if(rb_type(rb_text) == T_STRING) {
-      size_t text_len = RSTRING_LEN(rb_text);
-
-      if(end_byte - start_byte != text_len) continue;
-      if(start_byte == end_byte && text_len == 0) return Qtrue;
-
-      const char *input = RSTRING_PTR(rb_input);
-      size_t input_len = RSTRING_LEN(rb_input);
-
-      rb_node_check_input_range(start_byte, end_byte, input_len);
-      if(!rb_memcmp(input + start_byte, RSTRING_PTR(rb_text), end_byte - start_byte)) {
-        return Qtrue;
-      }
-    }
-  }
-
-  return Qfalse;
+  return rb_attached_tree_text_p(tree, start_byte, end_byte, argc, argv);
 }
 
 VALUE
@@ -991,7 +1250,7 @@ node_to_hash(TSTreeCursor *cursor, TSNode node, Tree* tree, bool include_byte_ra
   VALUE rb_children = Qnil;
 
   if (child_count == 0 && tree->rb_input != Qnil) {
-    VALUE rb_text = rb_node_text_(node, tree->rb_input);
+    VALUE rb_text = rb_node_text_(node, tree);
     rb_hash_aset(rb_hash, RB_ID2SYM(id_text), rb_text);
   } else {
     if(include_byte_ranges) {
@@ -1056,6 +1315,7 @@ void init_node(void)
   rb_cNode = rb_define_class_under(rb_mTreeSitter, "Node", rb_cObject);
   rb_undef_alloc_func(rb_cNode);
   rb_define_method(rb_cNode, "to_s", rb_node_to_s, 0);
+  rb_define_method(rb_cNode, "__tokenize__", rb_node_tokenize, 1);
   rb_define_method(rb_cNode, "type", rb_node_type, 0);
   rb_define_method(rb_cNode, "tree", rb_node_tree, 0);
   rb_define_method(rb_cNode, "named?", rb_node_is_named, 0);
@@ -1102,4 +1362,15 @@ void init_node(void)
   rb_undef_alloc_func(rb_cPoint);
   rb_define_method(rb_cPoint, "row", rb_point_row, 0);
   rb_define_method(rb_cPoint, "column", rb_point_column, 0);
+
+  rb_cToken = rb_define_class_under(rb_mTreeSitter, "Token", rb_cObject);
+  rb_undef_alloc_func(rb_cObject);
+  rb_define_method(rb_cToken, "node", rb_token_node, 0);
+  rb_define_method(rb_cToken, "start_byte", rb_token_start_byte, 0);
+  rb_define_method(rb_cToken, "end_byte", rb_token_end_byte, 0);
+  rb_define_method(rb_cToken, "byte_range", rb_token_byte_range, 0);
+  rb_define_method(rb_cToken, "text", rb_token_text, 0);
+  rb_define_method(rb_cToken, "implicit?", rb_token_implicit_p, 0);
+  rb_define_method(rb_cToken, "whitespace?", rb_token_whitespace_p, 0);
+
 }

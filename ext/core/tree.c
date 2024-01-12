@@ -1204,7 +1204,6 @@ init_tree()
   id_error = rb_intern("error");
 
   VALUE rb_mTreeSitter = rb_define_module("TreeSitter");
-
   rb_cTree = rb_define_class_under(rb_mTreeSitter, "Tree", rb_cObject);
   rb_define_alloc_func(rb_cTree, rb_tree_alloc);
   rb_define_method(rb_cTree, "initialize", rb_tree_initialize, -1);
