@@ -62,7 +62,7 @@ static const rb_data_type_t point_type = {
     .flags = RUBY_TYPED_FREE_IMMEDIATELY,
 };
 
-static const rb_data_type_t token_type = {
+const rb_data_type_t token_type = {
     .wrap_struct_name = "Token",
     .function = {
         .dmark = token_mark,
@@ -450,7 +450,7 @@ rb_node_dig(int argc, VALUE *argv, VALUE self) {
 }
 
 static VALUE
-rb_node_has_ancestor_path(int argc, VALUE *argv, VALUE self) {
+rb_node_ancestor_path_p(int argc, VALUE *argv, VALUE self) {
 
   if(argc == 0) {
     return Qtrue;
@@ -1332,7 +1332,7 @@ void init_node(void)
   rb_define_method(rb_cNode, "child_by_field", rb_node_child_by_field, 1);
   rb_define_method(rb_cNode, "field?", rb_node_field_p, -1);
   rb_define_method(rb_cNode, "field", rb_node_field, 0);
-  rb_define_method(rb_cNode, "has_ancestor_path?", rb_node_has_ancestor_path, -1);
+  rb_define_method(rb_cNode, "has_ancestor_path?", rb_node_ancestor_path_p, -1);
   rb_define_method(rb_cNode, "named_child_at", rb_node_named_child_at, 1);
   rb_define_method(rb_cNode, "named_child_at?", rb_node_named_child_at_p, 2);
   rb_define_method(rb_cNode, "start_point", rb_node_start_point, 0);

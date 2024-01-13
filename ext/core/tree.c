@@ -67,6 +67,7 @@ tree_cursor_mark(void* obj)
 }
 
 extern const rb_data_type_t node_type;
+extern const rb_data_type_t token_type;
 
 const rb_data_type_t tree_cursor_type = {
     .wrap_struct_name = "Tree::Cursor",
@@ -824,8 +825,51 @@ find_path_by_byte(VALUE rb_tree, Language *language, TSNode node, uint32_t min_b
   *nodes_len_out = nodes_len;
 }
 
+static void
+get_min_max_byte(VALUE rb_token_node_or_goal_byte, uint32_t *min_byte, uint32_t *max_byte) {
+  switch(rb_type(rb_token_node_or_goal_byte)) {
+    case RUBY_T_DATA: {
+      if(rb_typeddata_is_kind_of(rb_token_node_or_goal_byte, &node_type)) {
+        AstNode *node;
+        TypedData_Get_Struct(rb_token_node_or_goal_byte, AstNode, &node_type, node);
+        *min_byte = MIN(*min_byte, ts_node_start_byte(node->ts_node));
+        *max_byte = MAX(*max_byte, ts_node_end_byte(node->ts_node) - 1);
+      } else if(rb_typeddata_is_kind_of(rb_token_node_or_goal_byte, &token_type)) {
+        Token *token;
+        TypedData_Get_Struct(rb_token_node_or_goal_byte, Token, &token_type, token);
+        *min_byte = MIN(*min_byte, token->start_byte);
+        *max_byte = MAX(*max_byte, token->end_byte - 1);
+      } else {
+        goto wrong_type;
+      }
+      break;
+    }
+  case RUBY_T_FIXNUM: {
+    uint32_t byte = (uint32_t) FIX2UINT(rb_token_node_or_goal_byte);
+    *min_byte = MIN(*min_byte, byte);
+    *max_byte = MAX(*max_byte, byte);
+    break;
+  }
+  case RUBY_T_ARRAY: {
+    for(long int i = 0; i < RARRAY_LEN(rb_token_node_or_goal_byte); i++) {
+      VALUE rb_token_node_or_goal_byte_ = RARRAY_AREF(rb_token_node_or_goal_byte, i);
+      get_min_max_byte(rb_token_node_or_goal_byte_, min_byte, max_byte);
+    }
+    break;
+  }
+  default:
+    goto wrong_type;
+    break;
+  }
+
+  return;
+
+wrong_type:
+  rb_raise(rb_eArgError, "must pass token or node");
+}
+
 static VALUE
-rb_tree_path_to(VALUE self, VALUE rb_goal_byte) {
+rb_tree_path_to(VALUE self, VALUE rb_token_node_or_goal_byte) {
   Tree* tree;
   TypedData_Get_Struct(self, Tree, &tree_type, tree);
 
@@ -834,18 +878,7 @@ rb_tree_path_to(VALUE self, VALUE rb_goal_byte) {
   uint32_t min_byte = UINT32_MAX;
   uint32_t max_byte = 0;
 
-  if(RB_TYPE_P(rb_goal_byte, T_ARRAY)) {
-    for(long int i = 0; i < RARRAY_LEN(rb_goal_byte); i++) {
-      VALUE rb_byte = RARRAY_AREF(rb_goal_byte, i);
-      uint32_t byte = (uint32_t) FIX2UINT(rb_byte);
-      min_byte = MIN(min_byte, byte);
-      max_byte = MAX(max_byte, byte);
-    }
-  } else {
-    min_byte = (uint32_t) FIX2UINT(rb_goal_byte);
-    max_byte = min_byte;
-  }
-
+  get_min_max_byte(rb_token_node_or_goal_byte, &min_byte, &max_byte);
   Language *language = rb_tree_language_(self);
 
   size_t nodes_len;
