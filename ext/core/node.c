@@ -176,6 +176,11 @@ rb_new_token(Token orig_token) {
   return TypedData_Wrap_Struct(rb_cToken, &token_type, token);
 }
 
+VALUE
+rb_new_token_from_ptr(Token *orig_token) {
+  return rb_new_token(*orig_token);
+}
+
 /*
  * Public: Get the starting position for a node.
  *
@@ -843,6 +848,40 @@ rb_attached_tree_is_whitespace_(Tree *tree, uint32_t start_byte, uint32_t end_by
 }
 
 static VALUE
+rb_attached_tree_text_starts_with_p(Tree *tree, uint32_t start_byte, uint32_t end_byte, int argc, VALUE *argv) {
+  rb_tree_check_attached(tree);
+
+  const char *input = RSTRING_PTR(tree->rb_input);
+
+  for(int i = 0; i < argc; i++) {
+    VALUE rb_prefix = argv[i];
+    long prefix_len = RSTRING_LEN(rb_prefix);
+    Check_Type(rb_prefix, T_STRING);
+    if(prefix_len > end_byte - start_byte) return Qfalse;
+    if(prefix_len == 0) return Qtrue;
+    if(!rb_memcmp(input + start_byte, RSTRING_PTR(rb_prefix), prefix_len)) return Qtrue;
+  }
+  return Qfalse;
+}
+
+static VALUE
+rb_attached_tree_text_ends_with_p(Tree *tree, uint32_t start_byte, uint32_t end_byte, int argc, VALUE *argv) {
+  rb_tree_check_attached(tree);
+
+  const char *input = RSTRING_PTR(tree->rb_input);
+
+  for(int i = 0; i < argc; i++) {
+    VALUE rb_suffix = argv[i];
+    long suffix_len = RSTRING_LEN(rb_suffix);
+    Check_Type(rb_suffix, T_STRING);
+    if(suffix_len > end_byte - start_byte) return Qfalse;
+    if(suffix_len == 0) return Qtrue;
+    if(!rb_memcmp(input + end_byte - suffix_len, RSTRING_PTR(rb_suffix), suffix_len)) return Qtrue;
+  }
+  return Qfalse;
+}
+
+static VALUE
 rb_attached_tree_text(Tree *tree, uint32_t start_byte, uint32_t end_byte) {
   rb_tree_check_attached(tree);
 
@@ -1000,9 +1039,8 @@ void node_tokenize(TSTreeCursor *cursor, TSNode node, VALUE rb_tree, Tree *tree,
 //   return cmp;
 // }
 
-static VALUE
-rb_node_tokenize(VALUE self, VALUE rb_whitespace)
-{
+TokenArray
+rb_node_tokenize_(VALUE self, VALUE rb_whitespace) {
   AstNode *node;
   TypedData_Get_Struct(self, AstNode, &node_type, node);
 
@@ -1021,7 +1059,15 @@ rb_node_tokenize(VALUE self, VALUE rb_whitespace)
   };
   tokens.data = RB_ZALLOC_N(Token, tokens.capa);
   node_tokenize(&cursor, node->ts_node, node->rb_tree, tree, &tokens, whitespace);
+  ts_tree_cursor_delete(&cursor);
 
+  return tokens;
+}
+
+static VALUE
+rb_node_tokenize(VALUE self, VALUE rb_whitespace)
+{
+  TokenArray tokens = rb_node_tokenize_(self, rb_whitespace);
   VALUE rb_tokens = rb_ary_new_capa(tokens.len);
 
   // qsort(tokens.data, sizeof(Token), tokens.len, sort_tokens);
@@ -1031,7 +1077,6 @@ rb_node_tokenize(VALUE self, VALUE rb_whitespace)
 
   xfree(tokens.data);
 
-  ts_tree_cursor_delete(&cursor);
   return rb_tokens;
 }
 
@@ -1046,6 +1091,42 @@ rb_token_text(VALUE self)
 
   VALUE rb_text = rb_attached_tree_text(tree, token->start_byte, token->end_byte);
   return rb_text;
+}
+
+static VALUE
+rb_token_starts_with_p(int argc, VALUE *argv, VALUE self) {
+  Token *token;
+  TypedData_Get_Struct(self, Token, &token_type, token);
+
+  Tree *tree;
+  TypedData_Get_Struct(token->rb_tree, Tree, &tree_type, tree);
+
+  return rb_attached_tree_text_starts_with_p(tree, token->start_byte, token->end_byte, argc, argv);
+}
+
+static VALUE
+rb_token_ends_with_p(int argc, VALUE *argv, VALUE self) {
+
+  Token *token;
+  TypedData_Get_Struct(self, Token, &token_type, token);
+
+  Tree *tree;
+  TypedData_Get_Struct(token->rb_tree, Tree, &tree_type, tree);
+
+  return rb_attached_tree_text_ends_with_p(tree, token->start_byte, token->end_byte, argc, argv);
+}
+
+
+static VALUE
+rb_token_text_p(int argc, VALUE *argv, VALUE self)
+{
+  Token *token;
+  TypedData_Get_Struct(self, Token, &token_type, token);
+
+  Tree *tree;
+  TypedData_Get_Struct(token->rb_tree, Tree, &tree_type, tree);
+
+  return rb_attached_tree_text_p(tree, token->start_byte, token->end_byte, argc, argv);
 }
 
 static VALUE
@@ -1103,31 +1184,55 @@ rb_token_end_byte(VALUE self) {
   return INT2FIX(token->end_byte);
 }
 
+const char *
+rb_node_input_(VALUE self, uint32_t *start, uint32_t *len) {
+  AstNode *node;
+  TypedData_Get_Struct(self, AstNode, &node_type, node);
+
+  Tree *tree;
+  TypedData_Get_Struct(node->rb_tree, Tree, &tree_type, tree);
+
+  uint32_t start_byte = ts_node_start_byte(node->ts_node);
+  uint32_t end_byte = ts_node_end_byte(node->ts_node);
+
+  VALUE rb_input = tree->rb_input;
+  const char *input = RSTRING_PTR(rb_input);
+  size_t input_len = RSTRING_LEN(rb_input);
+
+  rb_attached_tree_check_range(start_byte, end_byte, input_len);
+  *start = start_byte;
+  *len = end_byte - start_byte;
+  return input + start_byte;
+}
 
 static VALUE
-rb_node_text_starts_with_p(VALUE self, VALUE rb_prefix) {
-
-  Check_Type(rb_prefix, T_STRING);
+rb_node_text_starts_with_p(int argc, VALUE *argv, VALUE self) {
 
   AstNode *node;
   TypedData_Get_Struct(self, AstNode, &node_type, node);
 
   Tree *tree;
   TypedData_Get_Struct(node->rb_tree, Tree, &tree_type, tree);
-  rb_tree_check_attached(tree);
-
-  VALUE rb_input = tree->rb_input;
-  const char *input = RSTRING_PTR(rb_input);
 
   uint32_t start_byte = ts_node_start_byte(node->ts_node);
   uint32_t end_byte = ts_node_end_byte(node->ts_node);
 
-  long prefix_len = RSTRING_LEN(rb_prefix);
+  return rb_attached_tree_text_starts_with_p(tree, start_byte, end_byte, argc, argv);
+}
 
-  if(prefix_len > end_byte - start_byte) return Qfalse;
-  if(prefix_len == 0) return Qtrue;
-  if(!rb_memcmp(input + start_byte, RSTRING_PTR(rb_prefix), prefix_len)) return Qtrue;
-  return Qfalse;
+static VALUE
+rb_node_text_ends_with_p(int argc, VALUE *argv, VALUE self) {
+
+  AstNode *node;
+  TypedData_Get_Struct(self, AstNode, &node_type, node);
+
+  Tree *tree;
+  TypedData_Get_Struct(node->rb_tree, Tree, &tree_type, tree);
+
+  uint32_t start_byte = ts_node_start_byte(node->ts_node);
+  uint32_t end_byte = ts_node_end_byte(node->ts_node);
+
+  return rb_attached_tree_text_ends_with_p(tree, start_byte, end_byte, argc, argv);
 }
 
 
@@ -1346,7 +1451,8 @@ void init_node(void)
   rb_define_method(rb_cNode, "named_children", rb_node_named_children, 0);
   rb_define_method(rb_cNode, "each_named_child", rb_node_each_named_child, 0);
   rb_define_method(rb_cNode, "text", rb_node_text, 0);
-  rb_define_method(rb_cNode, "text_starts_with?", rb_node_text_starts_with_p, 1);
+  rb_define_method(rb_cNode, "text_starts_with?", rb_node_text_starts_with_p, -1);
+  rb_define_method(rb_cNode, "text_ends_with?", rb_node_text_ends_with_p, -1);
   rb_define_method(rb_cNode, "byte_range", rb_node_byte_range, 0);
   rb_define_method(rb_cNode, "start_byte", rb_node_start_byte, 0);
   rb_define_method(rb_cNode, "end_byte", rb_node_end_byte, 0);
@@ -1370,7 +1476,10 @@ void init_node(void)
   rb_define_method(rb_cToken, "end_byte", rb_token_end_byte, 0);
   rb_define_method(rb_cToken, "byte_range", rb_token_byte_range, 0);
   rb_define_method(rb_cToken, "text", rb_token_text, 0);
+  rb_define_method(rb_cToken, "text?", rb_token_text_p, -1);
   rb_define_method(rb_cToken, "implicit?", rb_token_implicit_p, 0);
   rb_define_method(rb_cToken, "whitespace?", rb_token_whitespace_p, 0);
+  rb_define_method(rb_cToken, "starts_with?", rb_token_starts_with_p, -1);
+  rb_define_method(rb_cToken, "ends_with?", rb_token_ends_with_p, -1);
 
 }
