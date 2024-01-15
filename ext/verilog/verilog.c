@@ -4,7 +4,7 @@
 extern const void *tree_sitter_verilog(void);
 extern void require_core(void);
 extern ID id___language__;
-extern VALUE rb_new_language(TSLanguage *ts_language);
+extern VALUE rb_new_language(TSLanguage *ts_language, int language_id);
 
 void Init_verilog()
 {
@@ -18,7 +18,7 @@ void Init_verilog()
   VALUE rb_cVerilog_Query = rb_define_class_under(rb_cVerilog, "Query", cQuery);
 
   VALUE rb_cVerilog_s = rb_singleton_class(rb_cVerilog);
-  VALUE rb_language = rb_new_language((TSLanguage *)tree_sitter_verilog());
+  VALUE rb_language = rb_new_language((TSLanguage *)tree_sitter_verilog(), LANGUAGE_VERILOG);
 
   rb_ivar_set(rb_cVerilog, id___language__, rb_language);
   rb_ivar_set(rb_cVerilog_Query, id___language__, rb_language);

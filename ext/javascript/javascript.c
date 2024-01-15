@@ -4,7 +4,7 @@
 extern const void *tree_sitter_javascript(void);
 extern void require_core(void);
 extern ID id___language__;
-extern VALUE rb_new_language(TSLanguage *ts_language);
+extern VALUE rb_new_language(TSLanguage *ts_language, int language_id);
 
 void Init_javascript()
 {
@@ -18,7 +18,7 @@ void Init_javascript()
   VALUE rb_cJavascript_Query = rb_define_class_under(rb_cJavascript, "Query", cQuery);
 
   VALUE rb_cJavascript_s = rb_singleton_class(rb_cJavascript);
-  VALUE rb_language = rb_new_language((TSLanguage *)tree_sitter_javascript());
+  VALUE rb_language = rb_new_language((TSLanguage *)tree_sitter_javascript(), LANGUAGE_JAVASCRIPT);
 
   rb_ivar_set(rb_cJavascript, id___language__, rb_language);
   rb_ivar_set(rb_cJavascript_Query, id___language__, rb_language);

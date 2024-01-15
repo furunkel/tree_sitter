@@ -4,7 +4,7 @@
 extern const void *tree_sitter_c(void);
 extern void require_core(void);
 extern ID id___language__;
-extern VALUE rb_new_language(TSLanguage *ts_language);
+extern VALUE rb_new_language(TSLanguage *ts_language, int language_id);
 
 void Init_c()
 {
@@ -18,7 +18,7 @@ void Init_c()
   VALUE rb_cC_Query = rb_define_class_under(rb_cC, "Query", cQuery);
 
   VALUE rb_cC_s = rb_singleton_class(rb_cC);
-  VALUE rb_language = rb_new_language((TSLanguage *)tree_sitter_c());
+  VALUE rb_language = rb_new_language((TSLanguage *)tree_sitter_c(), LANGUAGE_C);
 
   rb_ivar_set(rb_cC, id___language__, rb_language);
   rb_ivar_set(rb_cC_Query, id___language__, rb_language);

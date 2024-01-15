@@ -4,7 +4,7 @@
 extern const void *tree_sitter_jsdoc(void);
 extern void require_core(void);
 extern ID id___language__;
-extern VALUE rb_new_language(TSLanguage *ts_language);
+extern VALUE rb_new_language(TSLanguage *ts_language, int language_id);
 
 void Init_jsdoc()
 {
@@ -18,7 +18,7 @@ void Init_jsdoc()
   VALUE rb_cJsdoc_Query = rb_define_class_under(rb_cJsdoc, "Query", cQuery);
 
   VALUE rb_cJsdoc_s = rb_singleton_class(rb_cJsdoc);
-  VALUE rb_language = rb_new_language((TSLanguage *)tree_sitter_jsdoc());
+  VALUE rb_language = rb_new_language((TSLanguage *)tree_sitter_jsdoc(), LANGUAGE_JSDOC);
 
   rb_ivar_set(rb_cJsdoc, id___language__, rb_language);
   rb_ivar_set(rb_cJsdoc_Query, id___language__, rb_language);

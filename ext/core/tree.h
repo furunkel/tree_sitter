@@ -2,6 +2,7 @@
 
 #include "ruby.h"
 #include "tree_sitter/api.h"
+#include "language_ids.h"
 
 typedef struct {
   TSTreeCursor ts_tree_cursor;
@@ -9,8 +10,8 @@ typedef struct {
 } TreeCursor;
 
 typedef struct {
+  LanguageId id;
   TSLanguage *ts_language;
-
   st_table *ts_symbol_table;
   ID *ts_symbol2id;
   size_t field_count;
@@ -42,10 +43,12 @@ typedef struct {
   TSQuery *ts_query;
 } Query;
 
+VALUE rb_tree_path_to(VALUE self, VALUE rb_token_node_or_goal_byte);
+
 #include "node.h"
 
 void init_tree();
-VALUE rb_new_language(TSLanguage *ts_language);
+VALUE rb_new_language(TSLanguage *ts_language, LanguageId id);
 
 extern const rb_data_type_t language_type;
 extern const rb_data_type_t tree_type;

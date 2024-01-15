@@ -4,7 +4,7 @@
 extern const void *tree_sitter_java(void);
 extern void require_core(void);
 extern ID id___language__;
-extern VALUE rb_new_language(TSLanguage *ts_language);
+extern VALUE rb_new_language(TSLanguage *ts_language, int language_id);
 
 void Init_java()
 {
@@ -18,7 +18,7 @@ void Init_java()
   VALUE rb_cJava_Query = rb_define_class_under(rb_cJava, "Query", cQuery);
 
   VALUE rb_cJava_s = rb_singleton_class(rb_cJava);
-  VALUE rb_language = rb_new_language((TSLanguage *)tree_sitter_java());
+  VALUE rb_language = rb_new_language((TSLanguage *)tree_sitter_java(), LANGUAGE_JAVA);
 
   rb_ivar_set(rb_cJava, id___language__, rb_language);
   rb_ivar_set(rb_cJava_Query, id___language__, rb_language);

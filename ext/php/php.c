@@ -4,7 +4,7 @@
 extern const void *tree_sitter_php(void);
 extern void require_core(void);
 extern ID id___language__;
-extern VALUE rb_new_language(TSLanguage *ts_language);
+extern VALUE rb_new_language(TSLanguage *ts_language, int language_id);
 
 void Init_php()
 {
@@ -18,7 +18,7 @@ void Init_php()
   VALUE rb_cPhp_Query = rb_define_class_under(rb_cPhp, "Query", cQuery);
 
   VALUE rb_cPhp_s = rb_singleton_class(rb_cPhp);
-  VALUE rb_language = rb_new_language((TSLanguage *)tree_sitter_php());
+  VALUE rb_language = rb_new_language((TSLanguage *)tree_sitter_php(), LANGUAGE_PHP);
 
   rb_ivar_set(rb_cPhp, id___language__, rb_language);
   rb_ivar_set(rb_cPhp_Query, id___language__, rb_language);

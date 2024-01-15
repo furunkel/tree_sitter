@@ -4,7 +4,7 @@
 extern const void *tree_sitter_julia(void);
 extern void require_core(void);
 extern ID id___language__;
-extern VALUE rb_new_language(TSLanguage *ts_language);
+extern VALUE rb_new_language(TSLanguage *ts_language, int language_id);
 
 void Init_julia()
 {
@@ -18,7 +18,7 @@ void Init_julia()
   VALUE rb_cJulia_Query = rb_define_class_under(rb_cJulia, "Query", cQuery);
 
   VALUE rb_cJulia_s = rb_singleton_class(rb_cJulia);
-  VALUE rb_language = rb_new_language((TSLanguage *)tree_sitter_julia());
+  VALUE rb_language = rb_new_language((TSLanguage *)tree_sitter_julia(), LANGUAGE_JULIA);
 
   rb_ivar_set(rb_cJulia, id___language__, rb_language);
   rb_ivar_set(rb_cJulia_Query, id___language__, rb_language);

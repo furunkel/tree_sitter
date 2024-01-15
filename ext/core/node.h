@@ -25,6 +25,7 @@ typedef struct {
   uint32_t start_byte;
   uint32_t end_byte;
   bool implicit;
+  bool before_newline;
 } Token;
 
 void init_node();

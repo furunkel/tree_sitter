@@ -4,7 +4,7 @@
 extern const void *tree_sitter_swift(void);
 extern void require_core(void);
 extern ID id___language__;
-extern VALUE rb_new_language(TSLanguage *ts_language);
+extern VALUE rb_new_language(TSLanguage *ts_language, int language_id);
 
 void Init_swift()
 {
@@ -18,7 +18,7 @@ void Init_swift()
   VALUE rb_cSwift_Query = rb_define_class_under(rb_cSwift, "Query", cQuery);
 
   VALUE rb_cSwift_s = rb_singleton_class(rb_cSwift);
-  VALUE rb_language = rb_new_language((TSLanguage *)tree_sitter_swift());
+  VALUE rb_language = rb_new_language((TSLanguage *)tree_sitter_swift(), LANGUAGE_SWIFT);
 
   rb_ivar_set(rb_cSwift, id___language__, rb_language);
   rb_ivar_set(rb_cSwift_Query, id___language__, rb_language);

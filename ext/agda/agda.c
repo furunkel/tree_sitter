@@ -4,7 +4,7 @@
 extern const void *tree_sitter_agda(void);
 extern void require_core(void);
 extern ID id___language__;
-extern VALUE rb_new_language(TSLanguage *ts_language);
+extern VALUE rb_new_language(TSLanguage *ts_language, int language_id);
 
 void Init_agda()
 {
@@ -18,7 +18,7 @@ void Init_agda()
   VALUE rb_cAgda_Query = rb_define_class_under(rb_cAgda, "Query", cQuery);
 
   VALUE rb_cAgda_s = rb_singleton_class(rb_cAgda);
-  VALUE rb_language = rb_new_language((TSLanguage *)tree_sitter_agda());
+  VALUE rb_language = rb_new_language((TSLanguage *)tree_sitter_agda(), LANGUAGE_AGDA);
 
   rb_ivar_set(rb_cAgda, id___language__, rb_language);
   rb_ivar_set(rb_cAgda_Query, id___language__, rb_language);

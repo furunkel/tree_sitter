@@ -22,8 +22,8 @@ module TreeSitter
       "#<#{self.class}: #{text}#{type} (#{byte_range.inspect})>"
     end
 
-    def tokenize(whitespace: false)
-      __tokenize__(whitespace)
+    def tokenize(ignore_whitespace: true, ignore_comments: false)
+      __tokenize__(ignore_whitespace, ignore_comments)
     end
   end
 end

@@ -4,7 +4,7 @@
 extern const void *tree_sitter_cpp(void);
 extern void require_core(void);
 extern ID id___language__;
-extern VALUE rb_new_language(TSLanguage *ts_language);
+extern VALUE rb_new_language(TSLanguage *ts_language, int language_id);
 
 void Init_cpp()
 {
@@ -18,7 +18,7 @@ void Init_cpp()
   VALUE rb_cCpp_Query = rb_define_class_under(rb_cCpp, "Query", cQuery);
 
   VALUE rb_cCpp_s = rb_singleton_class(rb_cCpp);
-  VALUE rb_language = rb_new_language((TSLanguage *)tree_sitter_cpp());
+  VALUE rb_language = rb_new_language((TSLanguage *)tree_sitter_cpp(), LANGUAGE_CPP);
 
   rb_ivar_set(rb_cCpp, id___language__, rb_language);
   rb_ivar_set(rb_cCpp_Query, id___language__, rb_language);

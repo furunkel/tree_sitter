@@ -26,10 +26,10 @@ end
 
 task default: %i[test rubocop]
 
- LANGUAGES = %w[javascript python go ruby java
-                typescript bash haskell c-sharp cpp agda
-                go php scala swift verilog c rust css ocaml json
-                regex html julia ql tsq jsdoc]
+LANGUAGES = %w[javascript python go ruby java
+               typescript bash haskell c-sharp cpp agda
+               php scala swift verilog c rust css ocaml json
+               regex html julia ql tsq jsdoc]
 
 
 def transform_file(filename, &block)
@@ -47,7 +47,7 @@ end
 
 
 template_dir = File.join(__dir__, 'ext', 'template')
-LANGUAGES.each do |language|
+LANGUAGES.each_with_index do |language, language_index|
   language_underscore = language.gsub('-', '_')
   dest_dir = File.join(__dir__, 'ext', language_underscore)
   task :"download_languages:#{language_underscore}" do
@@ -74,12 +74,24 @@ LANGUAGES.each do |language|
       cp orig_path, path
       transform_file(path) do |content|
         content.gsub('template', language.gsub('-', '_'))
-              .gsub('Template', language.split('-').map(&:capitalize).join(''))
-              .gsub('TEMPLATE', language.gsub('-', '_').upcase)
+               .gsub('Template', language.split('-').map(&:capitalize).join(''))
+               .gsub('TEMPLATE', language.gsub('-', '_').upcase)
+               .gsub('LANGUAGE_ID', language_index.to_s)
       end
     end
     mv File.join(dest_dir, 'template.c'), File.join(dest_dir, "#{language_underscore}.c")
   end
+end
+
+task :gen_language_ids_header do
+  filename = File.join(__dir__, 'ext', 'core', 'language_ids.h')
+  language_ids = <<~CODE
+    #pragma once
+    typedef enum {
+      #{ LANGUAGES.map.with_index { "LANGUAGE_#{_1.gsub('-', '_').upcase} = #{_2}" }.join(",\n  ") }
+    } LanguageId;
+  CODE
+  File.write(filename, language_ids)
 end
 
 task :download_languages => LANGUAGES.map { :"download_languages:#{_1.gsub('-', '_')}" }

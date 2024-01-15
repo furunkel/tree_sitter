@@ -1,6 +1,9 @@
 #include "tree.h"
+#include "common.h"
 #include "tree_sitter/api.h"
 #include <wctype.h>
+#include "language_ids.h"
+
 static VALUE rb_cTree;
 static VALUE rb_cTreeCursor;
 static VALUE rb_cLanguage;
@@ -206,7 +209,7 @@ const rb_data_type_t language_type = {
 };
 
 VALUE
-rb_new_language(TSLanguage *ts_language)
+rb_new_language(TSLanguage *ts_language, LanguageId language_id)
 {
   Language *language = RB_ZALLOC(Language);
   language->ts_language = ts_language;
@@ -221,6 +224,7 @@ rb_new_language(TSLanguage *ts_language)
   language->ts_field2id = RB_ZALLOC_N(ID, field_count + 1);
   language->symbol_count = symbol_count;
   language->field_count = field_count + 1;
+  language->id = (LanguageId) language_id;
 
   for(uint32_t i = 0; i < symbol_count; i++) {
     const char *symbol_name = ts_language_symbol_name(ts_language, (TSSymbol) i);
@@ -868,7 +872,7 @@ wrong_type:
   rb_raise(rb_eArgError, "must pass token or node");
 }
 
-static VALUE
+VALUE
 rb_tree_path_to(VALUE self, VALUE rb_token_node_or_goal_byte) {
   Tree* tree;
   TypedData_Get_Struct(self, Tree, &tree_type, tree);
@@ -1085,6 +1089,33 @@ rb_tree_path_fetch(VALUE self, VALUE rb_index) {
     rb_raise(rb_eArgError, "must pass symbol or array of symbols");\
     return -1; \
   }
+
+static VALUE
+rb_tree_path_to_s(VALUE self)
+{
+  TreePath* tree_path;
+  TypedData_Get_Struct(self, TreePath, &tree_path_type, tree_path);
+
+  Language *language = rb_tree_language_(tree_path->rb_tree);
+
+  VALUE rb_buf = rb_str_buf_new(256);
+
+  for(uint32_t i = 0; i < tree_path->len; i++) {
+    TreePathNode path_node = tree_path->nodes[i];
+
+    rb_str_cat2(rb_buf, "/");
+
+    if(path_node.field_id != 0) {
+      ID field_id = language_field2id(language, path_node.field_id);
+      rb_str_cat2(rb_buf, rb_id2name(field_id));
+      rb_str_cat2(rb_buf, ":");
+    }
+
+    ID symbol_id = language_symbol2id(language, ts_node_symbol(path_node.ts_node));
+    rb_str_cat2(rb_buf, rb_id2name(symbol_id));
+  }
+  return rb_buf;
+}
 
 
 static long
@@ -1303,6 +1334,7 @@ init_tree()
   rb_define_method(rb_cTreePath, "__find_by_type__", rb_tree_path_find_by_type, 3);
   rb_define_method(rb_cTreePath, "last", rb_tree_path_last, 0);
   rb_define_method(rb_cTreePath, "first", rb_tree_path_first, 0);
+  rb_define_method(rb_cTreePath, "to_s", rb_tree_path_to_s, 0);
 
   VALUE rb_cQuery = rb_define_class_under(rb_cTree, "Query", rb_cObject);
   rb_define_singleton_method(rb_cQuery, "new", rb_query_new, 1);

@@ -4,7 +4,7 @@
 extern const void *tree_sitter_c_sharp(void);
 extern void require_core(void);
 extern ID id___language__;
-extern VALUE rb_new_language(TSLanguage *ts_language);
+extern VALUE rb_new_language(TSLanguage *ts_language, int language_id);
 
 void Init_c_sharp()
 {
@@ -18,7 +18,7 @@ void Init_c_sharp()
   VALUE rb_cCSharp_Query = rb_define_class_under(rb_cCSharp, "Query", cQuery);
 
   VALUE rb_cCSharp_s = rb_singleton_class(rb_cCSharp);
-  VALUE rb_language = rb_new_language((TSLanguage *)tree_sitter_c_sharp());
+  VALUE rb_language = rb_new_language((TSLanguage *)tree_sitter_c_sharp(), LANGUAGE_C_SHARP);
 
   rb_ivar_set(rb_cCSharp, id___language__, rb_language);
   rb_ivar_set(rb_cCSharp_Query, id___language__, rb_language);

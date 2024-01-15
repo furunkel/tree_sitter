@@ -4,7 +4,7 @@
 extern const void *tree_sitter_bash(void);
 extern void require_core(void);
 extern ID id___language__;
-extern VALUE rb_new_language(TSLanguage *ts_language);
+extern VALUE rb_new_language(TSLanguage *ts_language, int language_id);
 
 void Init_bash()
 {
@@ -18,7 +18,7 @@ void Init_bash()
   VALUE rb_cBash_Query = rb_define_class_under(rb_cBash, "Query", cQuery);
 
   VALUE rb_cBash_s = rb_singleton_class(rb_cBash);
-  VALUE rb_language = rb_new_language((TSLanguage *)tree_sitter_bash());
+  VALUE rb_language = rb_new_language((TSLanguage *)tree_sitter_bash(), LANGUAGE_BASH);
 
   rb_ivar_set(rb_cBash, id___language__, rb_language);
   rb_ivar_set(rb_cBash_Query, id___language__, rb_language);

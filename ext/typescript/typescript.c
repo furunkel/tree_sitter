@@ -4,7 +4,7 @@
 extern const void *tree_sitter_typescript(void);
 extern void require_core(void);
 extern ID id___language__;
-extern VALUE rb_new_language(TSLanguage *ts_language);
+extern VALUE rb_new_language(TSLanguage *ts_language, int language_id);
 
 void Init_typescript()
 {
@@ -18,7 +18,7 @@ void Init_typescript()
   VALUE rb_cTypescript_Query = rb_define_class_under(rb_cTypescript, "Query", cQuery);
 
   VALUE rb_cTypescript_s = rb_singleton_class(rb_cTypescript);
-  VALUE rb_language = rb_new_language((TSLanguage *)tree_sitter_typescript());
+  VALUE rb_language = rb_new_language((TSLanguage *)tree_sitter_typescript(), LANGUAGE_TYPESCRIPT);
 
   rb_ivar_set(rb_cTypescript, id___language__, rb_language);
   rb_ivar_set(rb_cTypescript_Query, id___language__, rb_language);
