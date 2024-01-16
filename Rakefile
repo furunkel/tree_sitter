@@ -76,6 +76,8 @@ LANGUAGE_FILES = %w[src/parser.c
                   src/scanner.cc
                   src/tree_sitter/parser.h
                   src/tag.h
+                  src/unicode.h
+                  src/stack.h
                 ].freeze
 
 template_dir = File.join(__dir__, 'ext', 'template')

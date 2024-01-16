@@ -1,11 +1,7 @@
-// The Tree-sitter library can be built by compiling this one source file.
-//
-// The following directories must be added to the include path:
-//   - include
-
 #define _POSIX_C_SOURCE 200112L
 
 #include "alloc.h"
+#include "vendor/src/alloc.c"
 #include "vendor/src/get_changed_ranges.c"
 #include "vendor/src/language.c"
 #include "vendor/src/lexer.c"
@@ -16,3 +12,4 @@
 #include "vendor/src/subtree.c"
 #include "vendor/src/tree_cursor.c"
 #include "vendor/src/tree.c"
+#include "vendor/src/wasm.c"

@@ -155,6 +155,7 @@ node_is_comment(TSNode node, Language *language) {
     case LANGUAGE_C_SHARP:
     case LANGUAGE_CPP:
     case LANGUAGE_PHP:
+    case LANGUAGE_PHP_ONLY:
     case LANGUAGE_C:
     case LANGUAGE_BASH:
       return !strcmp(symbol_name, "comment");
