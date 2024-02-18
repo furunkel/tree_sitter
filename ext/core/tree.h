@@ -61,18 +61,24 @@ rb_tree_language_(VALUE self) {
 }
 
 extern ID id_error;
+extern ID id_invalid;
 
 static inline ID
 language_symbol2id(Language *language, TSSymbol symbol) {
   if(symbol == ((TSSymbol) -1)) {
     return id_error;
-  } else {
-    return language->ts_symbol2id[symbol];
+  } 
+  if(symbol >= language->symbol_count) {
+    return id_invalid;
   }
+  return language->ts_symbol2id[symbol];
 }
 
 static inline ID
 language_field2id(Language *language, TSFieldId field_id) {
+  if(field_id >= language->field_count + 1 || field_id == 0) {
+    return id_invalid;
+  }
   return language->ts_field2id[field_id];
 }
 

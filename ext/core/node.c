@@ -1,4 +1,16 @@
 #include "node.h"
+#include "ruby/internal/arithmetic/int.h"
+#include "ruby/internal/arithmetic/long.h"
+#include "ruby/internal/arithmetic/short.h"
+#include "ruby/internal/globals.h"
+#include "ruby/internal/intern/array.h"
+#include "ruby/internal/intern/io.h"
+#include "ruby/internal/intern/object.h"
+#include "ruby/internal/memory.h"
+#include "ruby/internal/special_consts.h"
+#include "ruby/internal/symbol.h"
+#include "ruby/ruby.h"
+#include "tree.h"
 #include "tree_sitter/api.h"
 #include <stdint.h>
 #include <stdlib.h>
@@ -9,12 +21,16 @@
 VALUE rb_cNode;
 VALUE rb_cPoint;
 VALUE rb_cToken;
+VALUE rb_cPQGram;
 
 static ID id_type;
 static ID id_byte_range;
 static ID id_children;
 static ID id_field;
 static ID id_text;
+static ID id_star;
+static ID id_plus;
+static ID id_minus;
 
 static void node_free(void *n) {
   xfree(n);
@@ -25,9 +41,13 @@ static void node_mark(void *n) {
   rb_gc_mark(node->rb_tree);
 }
 
+void tree_sitter_token_mark(Token *token) {
+  rb_gc_mark(token->rb_tree);
+}
+
 static void token_mark(void *t) {
   Token *token = (Token *) t;
-  rb_gc_mark(token->rb_tree);
+  tree_sitter_token_mark(token);
 }
 
 void point_free(void *p) {
@@ -72,6 +92,41 @@ const rb_data_type_t token_type = {
     .data = NULL,
     .flags = RUBY_TYPED_FREE_IMMEDIATELY,
 };
+
+typedef struct {
+  uint16_t node_symbol;
+  uint16_t field_id;
+  uint8_t empty;
+} PQAtom;
+
+// typedef struct PQGram {
+//   //VALUE rb_tree;
+//   VALUE rb_language;
+//   uint32_t len;
+//   PQAtom *atoms;
+// } PQGram;
+
+// static void pq_gram_free(void *p) {
+//   PQGram *pq_gram = (PQGram *) p;
+//   xfree(pq_gram->atoms);
+//   xfree(p);
+// }
+
+// static void pq_gram_mark(void *p) {
+//   PQGram *pq_gram = (PQGram *) p;
+//   rb_gc_mark(pq_gram->rb_language);
+// }
+
+// const rb_data_type_t pq_gram_type = {
+//     .wrap_struct_name = "PQGram",
+//     .function = {
+//         .dmark = pq_gram_mark,
+//         .dfree = pq_gram_free,
+//         .dsize = NULL,
+//     },
+//     .data = NULL,
+//     .flags = RUBY_TYPED_FREE_IMMEDIATELY,
+// };
 
 Tree *
 node_get_tree(AstNode *node) {
@@ -490,7 +545,7 @@ rb_node_dig(int argc, VALUE *argv, VALUE self) {
         }
         break;
       }
-      case RUBY_T_FIXNUM:
+      case RUBY_T_FIXNUM: {
         TSNode child;
         if(rb_node_child_at_(n, rb_index_or_field, &child)) {
           n = child;
@@ -498,6 +553,7 @@ rb_node_dig(int argc, VALUE *argv, VALUE self) {
           return Qnil;
         }
         break;
+      }
       default: {
         rb_raise(rb_eArgError, "expected integer or symbol");
         return Qnil;
@@ -1091,6 +1147,7 @@ add_implicit_token(Tree *tree, VALUE rb_tree, TSNode node,
       .start_byte = start_byte,
       .end_byte = end_byte,
       .rb_tree = rb_tree,
+      .node_symbol = UINT16_MAX,
       .implicit = true,
       .before_newline = false,
     };
@@ -1135,11 +1192,13 @@ void node_tokenize(TSTreeCursor *cursor, TSNode node, VALUE rb_tree,
     }
   } else {
     if(include_comments || !node_is_comment(node, language)) {
+      TSSymbol node_symbol = ts_node_symbol(node);
       Token token = {
         .ts_node = node,
         .start_byte = start_byte,
         .end_byte = end_byte,
         .rb_tree = rb_tree,
+        .node_symbol = node_symbol,
         .implicit = false,
         .before_newline = false,
       };
@@ -1236,6 +1295,14 @@ rb_token_ends_with_p(int argc, VALUE *argv, VALUE self) {
   TypedData_Get_Struct(token->rb_tree, Tree, &tree_type, tree);
 
   return rb_attached_tree_text_ends_with_p(tree, token->start_byte, token->end_byte, argc, argv);
+}
+
+static VALUE
+rb_token_path_from_root(VALUE self) {
+  Token *token;
+  TypedData_Get_Struct(self, Token, &token_type, token);
+
+  return rb_tree_path_to(token->rb_tree, self);
 }
 
 
@@ -1453,6 +1520,364 @@ rb_node_hash(VALUE self) {
   return RB_ST2FIX((st_index_t) node->ts_node.id);
 }
 
+
+typedef struct {
+  PQAtom *data;
+  unsigned size;
+  unsigned start;
+  uint8_t free;
+} ShiftRegister;
+
+static PQAtom
+pq_atom_empty() {
+  return (PQAtom) {.field_id = 0, .node_symbol = 0, .empty = true};
+}
+
+static void
+shift_register_reset(ShiftRegister *shift_register) {
+  for(size_t i = 0; i < shift_register->size; i++) {
+    shift_register->data[i] = pq_atom_empty();
+  }
+  shift_register->start = 0;
+}
+
+static void
+shift_register_init(ShiftRegister *shift_register, unsigned size, PQAtom *data) {
+  if(data) {
+    shift_register->data = data;
+    shift_register->free = false;
+  } else {
+    shift_register->data = RB_ALLOC_N(PQAtom, size);
+    shift_register->free = true;
+  }
+  shift_register->size = size;
+  shift_register_reset(shift_register);
+}
+
+static void
+shift_register_destroy(ShiftRegister *shift_register) {
+  if(shift_register->free) {
+    xfree(shift_register->data);
+  }
+}
+
+void
+shift_register_shift(ShiftRegister *shift_register, PQAtom atom) {
+  shift_register->data[shift_register->start] = atom;
+  shift_register->start = (shift_register->start + 1) % shift_register->size;
+}
+
+PQAtom
+shift_register_get(ShiftRegister *shift_register, unsigned idx) {
+  assert(idx < shift_register->size);
+  return shift_register->data[(shift_register->start + idx) % shift_register->size];
+}
+
+// static VALUE
+// rb_pg_gram_to_a(int argc, VALUE *argv, VALUE self) {
+//   PQGram *pq_gram;
+//   TypedData_Get_Struct(self, PQGram, &pq_gram_type, pq_gram);
+
+//   bool raw = false;
+//   if(argc > 0 && RTEST(argv[0])) {
+//     raw = true;
+//   }
+
+//   Language* language;
+//   TypedData_Get_Struct(pq_gram->rb_language, Language, &language_type, language);
+
+//   VALUE rb_ary = rb_ary_new_capa(pq_gram->len);
+//   for(size_t i = 0; i < pq_gram->len; i++) {
+//     PQAtom atom = pq_gram->atoms[i];
+
+//     if(raw) {
+//       if(atom.empty) {
+//         rb_ary_push(rb_ary, RB_INT2FIX(-1));
+//         rb_ary_push(rb_ary, RB_INT2FIX(-1));
+//       } else {
+//         rb_ary_push(rb_ary, RB_INT2FIX(atom.field_id));
+//         rb_ary_push(rb_ary, RB_INT2FIX(atom.node_symbol));
+//       }
+//     } else {
+//       if(atom.empty) {
+//         rb_ary_push(rb_ary, RB_ID2SYM(id_star));
+//         rb_ary_push(rb_ary, RB_ID2SYM(id_star));
+//       } else {
+//         language_symbol2id(language, (TSSymbol) )
+//         rb_ary_push(rb_ary, RB_INT2FIX(atom.field_id));
+//         rb_ary_push(rb_ary, RB_INT2FIX(atom.node_symbol));
+//       }
+//     }
+//   }
+//   return rb_ary;
+// }
+
+// static VALUE
+// rb_new_pq_gram_from_shift_registers(ShiftRegister *anc, ShiftRegister *sib) {
+//   PQGram *pq_gram = RB_ALLOC(PQGram);
+//   pq_gram->atoms = RB_ALLOC_N(PQAtom, anc->size + sib->size);
+
+//   for(size_t i = 0; i < anc->size; i++) {
+//     pq_gram->atoms[i] = shift_register_get(anc, i);
+//   }
+
+//   for(size_t i = 0; i < sib->size; i++) {
+//     pq_gram->atoms[anc->size + i] = shift_register_get(sib, i);
+//   }
+//   return TypedData_Wrap_Struct(rb_cPQGram, &pq_gram_type, pq_gram);
+// }
+
+typedef enum {
+  PQ_ACTION_NONE,
+  PQ_ACTION_INSERT,
+  PQ_ACTION_DELETE,
+} PQAction;
+
+static void
+pq_atom_to_rb_ary(PQAtom atom, VALUE rb_ary, Language *language, bool raw, PQAction action) {
+  if(raw) {
+    if(atom.empty) {
+      rb_ary_push(rb_ary, RB_INT2FIX(-1));
+      rb_ary_push(rb_ary, RB_INT2FIX(-1));
+    } else {
+      rb_ary_push(rb_ary, atom.field_id == 0 ? RB_INT2FIX(-1) : RB_INT2FIX(atom.field_id));
+      rb_ary_push(rb_ary, RB_INT2FIX(atom.node_symbol));
+    }
+  } else {
+    if(atom.empty) {
+      rb_ary_push(rb_ary, Qnil);
+      rb_ary_push(rb_ary, Qnil);
+    } else {
+      rb_ary_push(rb_ary, atom.field_id == 0 ? Qnil : RB_ID2SYM( language_field2id(language, (TSFieldId) atom.field_id)));
+      rb_ary_push(rb_ary, RB_ID2SYM(language_symbol2id(language, (TSSymbol) atom.node_symbol)));
+    }
+  }
+  if(action) {
+    if(raw) {
+      rb_ary_push(rb_ary, RB_INT2FIX(action));
+    } else {
+      switch(action) {
+        case PQ_ACTION_INSERT:
+          rb_ary_push(rb_ary, RB_ID2SYM(id_plus));
+          break;
+        case PQ_ACTION_DELETE:
+          rb_ary_push(rb_ary, RB_ID2SYM(id_minus));
+          break;
+        default:
+          break;
+      } 
+    }
+  }
+
+  // fprintf(stderr, "to_rb_ary: %s")
+  rb_p(rb_ary);
+  rb_io_flush(rb_stdout);
+  fprintf(stderr, "xxx\n");
+}
+
+
+// static VALUE
+// rb_new_pq_gram_from_shift_registers(ShiftRegister *anc, ShiftRegister *sib, bool raw, uint8_t action) {
+//   PQGram *pq_gram = RB_ALLOC(PQGram);
+//   pq_gram->atoms = RB_ALLOC_N(PQAtom, anc->size + sib->size);
+
+//   for(size_t i = 0; i < anc->size; i++) {
+//     pq_gram->atoms[i] = shift_register_get(anc, i);
+//   }
+
+//   for(size_t i = 0; i < sib->size; i++) {
+//     pq_gram->atoms[anc->size + i] = shift_register_get(sib, i);
+//   }
+//   return TypedData_Wrap_Struct(rb_cPQGram, &pq_gram_type, pq_gram);
+// }
+
+static VALUE
+rb_new_pq_gram_ary_from_shift_registers(ShiftRegister *anc, ShiftRegister *sib, Language *language, bool raw, PQAction action) {
+  VALUE rb_ary = rb_ary_new_capa(anc->size + sib->size);
+  for(size_t i = 0; i < anc->size; i++) {
+    PQAtom atom = shift_register_get(anc, i);
+    pq_atom_to_rb_ary(atom, rb_ary, language, raw, action);
+  }
+
+  for(size_t i = 0; i < sib->size; i++) {
+    PQAtom atom = shift_register_get(sib, i);
+    pq_atom_to_rb_ary(atom, rb_ary, language, raw, action);
+  }
+  return rb_ary;
+}
+
+typedef struct {
+  Tree* tree;
+  VALUE rb_ary;
+  ShiftRegister *anc;
+  unsigned q;
+  bool raw;
+  PQAction action;
+  unsigned max_depth;
+} PQProfileContext;
+
+static void
+node_pq_profile(PQProfileContext *ctx, TSTreeCursor *cursor, TSNode node, unsigned depth)
+{
+  TSSymbol node_symbol = ts_node_symbol(node);
+  uint32_t child_count = ts_node_child_count(node);
+  TSFieldId field_id = ts_tree_cursor_current_field_id(cursor);
+  ShiftRegister sib;
+
+  shift_register_shift(ctx->anc, (PQAtom){.node_symbol = node_symbol, .field_id = field_id, .empty = false});
+
+  PQAtom *sib_data = NULL;
+  if(ctx->q <= 8) {
+    sib_data = ALLOCA_N(PQAtom, ctx->q);
+  }
+  shift_register_init(&sib, ctx->q, sib_data);
+
+  if(child_count == 0 || depth == ctx->max_depth) {
+    VALUE rb_pq_gram = rb_new_pq_gram_ary_from_shift_registers(ctx->anc, &sib, ctx->tree->language, ctx->raw, ctx->action);
+    rb_ary_push(ctx->rb_ary, rb_pq_gram);
+  } else {
+    if(ts_tree_cursor_goto_first_child(cursor)) {
+      do {
+        TSNode child_node = ts_tree_cursor_current_node(cursor);
+        if(ts_node_is_named(child_node)) {
+          TSTreeCursor child_cursor = ts_tree_cursor_copy(cursor);
+          TSSymbol child_symbol = ts_node_symbol(child_node);
+          TSFieldId child_field_id = ts_tree_cursor_current_field_id(&child_cursor);
+          shift_register_shift(&sib, (PQAtom){.node_symbol = child_symbol, .field_id = child_field_id, .empty = false});
+          VALUE rb_pq_gram = rb_new_pq_gram_ary_from_shift_registers(ctx->anc, &sib, ctx->tree->language, ctx->raw, ctx->action);
+          rb_ary_push(ctx->rb_ary, rb_pq_gram);
+          node_pq_profile(ctx,&child_cursor, child_node, depth + 1);
+          ts_tree_cursor_delete(&child_cursor);
+        }
+      } while(ts_tree_cursor_goto_next_sibling(cursor));
+    }
+
+    for(size_t k = 0; k < ctx->q - 1; k++) {
+      shift_register_shift(&sib, pq_atom_empty());
+      VALUE rb_pq_gram = rb_new_pq_gram_ary_from_shift_registers(ctx->anc, &sib, ctx->tree->language, ctx->raw, ctx->action);
+      rb_ary_push(ctx->rb_ary, rb_pq_gram);
+    }
+
+  }
+
+
+  shift_register_destroy(&sib);
+}
+
+static TSFieldId
+find_field_id(TSNode parent, TSNode child) {
+  TSTreeCursor cursor = ts_tree_cursor_new(parent);
+  TSFieldId field_id = 0;
+
+  if(ts_tree_cursor_goto_first_child(&cursor)) {
+    do {
+      TSNode c = ts_tree_cursor_current_node(&cursor);
+      if(ts_node_eq(c, child)) {
+        field_id = ts_tree_cursor_current_field_id(&cursor);
+        break;
+      }
+    } while(ts_tree_cursor_goto_next_sibling(&cursor));
+  }
+
+  ts_tree_cursor_delete(&cursor);
+  return field_id;
+}
+
+
+
+static VALUE
+rb_node_pq_profile_(TSNode node, Tree *tree, VALUE rb_p, VALUE rb_q, VALUE rb_include_root_parents, VALUE rb_raw, VALUE rb_max_depth)
+{
+  Check_Type(rb_p, T_FIXNUM);
+  Check_Type(rb_q, T_FIXNUM);
+
+  unsigned p = RB_NUM2USHORT(rb_p);
+  unsigned q = RB_NUM2USHORT(rb_q);
+
+  if(!(p > 1 && q > 1)) {
+    rb_raise(rb_eArgError, "p and q must be > 1");
+    return Qnil;
+  }
+
+  bool include_root_parents = RTEST(rb_include_root_parents);
+  bool raw = RTEST(rb_raw);
+  int max_depth;
+  if(RB_NIL_P(rb_max_depth)) {
+    max_depth = -1;
+  } else {
+    max_depth = (int) RB_NUM2USHORT(rb_max_depth);
+  }
+
+  ShiftRegister anc;
+  shift_register_init(&anc, p, NULL);
+
+  if(include_root_parents && p > 1) {
+    PQAtom *stack;
+    bool heap = p - 1 > 10;
+    if(heap) {
+      stack = RB_ALLOC_N(PQAtom, p - 1);
+    } else {
+      stack = ALLOCA_N(PQAtom, p - 1);
+    }
+    size_t stack_len = 0;
+
+    TSNode child = node;
+    for(size_t i = 0; i < p - 1; p++) {
+      TSNode parent = ts_node_parent(child);
+      if(!ts_node_is_null(parent)) {
+        uint16_t field_id = find_field_id(parent, child);
+        uint16_t node_symbol = ts_node_symbol(parent);
+        stack[stack_len] = (PQAtom){.node_symbol = node_symbol, .field_id = field_id, .empty = false};
+        stack_len++;
+        child = parent;
+      } else {
+        break;
+      }
+    }
+
+    // shift them onto register in reverse order
+    for(ssize_t i = stack_len - 1; i >= 0; i--) {
+      shift_register_shift(&anc, stack[i]);
+    }
+
+    if(heap) {
+      xfree(stack);
+    }
+  }
+
+  VALUE rb_profile = rb_ary_new_capa(256);
+
+  PQProfileContext ctx = {
+    .tree = tree,
+    .rb_ary = rb_profile,
+    .anc = &anc,
+    .q = q,
+    .raw = raw,
+    .action = PQ_ACTION_NONE,
+    .max_depth = max_depth
+  };
+
+  TSTreeCursor cursor = ts_tree_cursor_new(node);
+  node_pq_profile(&ctx, &cursor, node, 0);
+  ts_tree_cursor_delete(&cursor);
+
+  shift_register_destroy(&anc);
+
+  return rb_profile;
+}
+
+
+
+static VALUE
+rb_node_pq_profile(VALUE self, VALUE rb_p, VALUE rb_q, VALUE rb_include_root_parents, VALUE rb_raw, VALUE rb_max_depth)
+{
+  AstNode *node;
+  TypedData_Get_Struct(self, AstNode, &node_type, node);
+
+  Tree *tree = node_get_tree(node);
+  return rb_node_pq_profile_(node->ts_node, tree, rb_p, rb_q, rb_include_root_parents, rb_raw, rb_max_depth);
+}
+
 static VALUE
 node_to_hash(TSTreeCursor *cursor, TSNode node, Tree* tree, bool include_byte_ranges, bool include_unnamed)
 {
@@ -1538,6 +1963,9 @@ void init_node(void)
   id_children = rb_intern("children");
   id_field = rb_intern("field");
   id_text = rb_intern("text");
+  id_star = rb_intern("*");
+  id_plus = rb_intern("+");
+  id_minus = rb_intern("-");
 
   rb_cNode = rb_define_class_under(rb_mTreeSitter, "Node", rb_cObject);
   rb_undef_alloc_func(rb_cNode);
@@ -1586,11 +2014,17 @@ void init_node(void)
   rb_define_method(rb_cNode, "text?", rb_node_text_p, -1);
   rb_define_method(rb_cNode, "type?", rb_node_type_p, -1);
   rb_define_method(rb_cNode, "comment?", rb_node_comment_p, 0);
+  rb_define_method(rb_cNode, "__pq_profile__", rb_node_pq_profile, 5);
 
   rb_cPoint = rb_define_class_under(rb_cNode, "Point", rb_cObject);
   rb_undef_alloc_func(rb_cPoint);
   rb_define_method(rb_cPoint, "row", rb_point_row, 0);
   rb_define_method(rb_cPoint, "column", rb_point_column, 0);
+
+  // rb_cPQGram = rb_define_class_under(rb_mTreeSitter, "PQGram", rb_cObject);
+  // rb_undef_alloc_func(rb_cPQGram);
+  // rb_define_method(rb_cPQGram, "to_a", rb_pq_gram_to_a, -1);
+
 
   rb_cToken = rb_define_class_under(rb_mTreeSitter, "Token", rb_cObject);
   rb_undef_alloc_func(rb_cToken);
@@ -1604,5 +2038,5 @@ void init_node(void)
   rb_define_method(rb_cToken, "whitespace?", rb_token_whitespace_p, 0);
   rb_define_method(rb_cToken, "starts_with?", rb_token_starts_with_p, -1);
   rb_define_method(rb_cToken, "ends_with?", rb_token_ends_with_p, -1);
-
+  rb_define_method(rb_cToken, "path_from_root", rb_token_path_from_root, 0);
 }

@@ -24,6 +24,7 @@ typedef struct {
   VALUE rb_tree;
   uint32_t start_byte;
   uint32_t end_byte;
+  uint16_t node_symbol;
   bool implicit;
   bool before_newline;
 } Token;

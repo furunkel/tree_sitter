@@ -14,6 +14,7 @@ static ID id_whitespace;
 static ID id_attach;
 
 ID id_error;
+ID id_invalid;
 ID id___language__;
 
 #ifndef MAX
@@ -235,7 +236,7 @@ rb_new_language(TSLanguage *ts_language, LanguageId language_id)
     }
   }
 
-  /* NOTE: for soem reason it's <= field_count */
+  /* NOTE: for some reason it's <= field_count */
   for(uint32_t i = 0; i <= field_count; i++) {
     const char *field_name = ts_language_field_name_for_id(ts_language, (TSFieldId) i);
     if(field_name != NULL) {
@@ -1266,6 +1267,7 @@ init_tree()
   id_whitespace = rb_intern("whitespace");
   id___language__ = rb_intern("@__language__");
   id_error = rb_intern("error");
+  id_invalid = rb_intern("invalid");
 
   VALUE rb_mTreeSitter = rb_define_module("TreeSitter");
   rb_cTree = rb_define_class_under(rb_mTreeSitter, "Tree", rb_cObject);
