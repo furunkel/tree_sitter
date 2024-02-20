@@ -22,8 +22,8 @@ module TreeSitter
       "#<#{self.class}: #{text}#{type} (#{byte_range.inspect})>"
     end
 
-    def pq_profile(p, q, include_root_parents: false, raw: false, max_depth: nil)
-      __pq_profile__(p, q, include_root_parents, raw, max_depth)
+    def pq_profile(p, q, include_root_ancestors: false, raw: false, max_depth: nil)
+      __pq_profile__(p, q, include_root_ancestors, raw, max_depth)
     end
 
     def tokenize(ignore_whitespace: true, ignore_comments: false)

@@ -468,6 +468,13 @@ rb_tree_language_s(VALUE self)
   return rb_language;
 }
 
+Tree *
+rb_tree_unwrap(VALUE self) {
+  Tree* tree;
+  TypedData_Get_Struct(self, Tree, &tree_type, tree);
+  return tree;
+}
+
 /*
  * Public: Creates a new tree
  *

@@ -1634,6 +1634,26 @@ typedef enum {
 } PQAction;
 
 static void
+pq_action_to_rb_ary(VALUE rb_ary, PQAction action, bool raw) {
+  if(action != PQ_ACTION_NONE) {
+    if(raw) {
+      rb_ary_push(rb_ary, RB_INT2FIX(action));
+    } else {
+      switch(action) {
+        case PQ_ACTION_INSERT:
+          rb_ary_push(rb_ary, RB_ID2SYM(id_plus));
+          break;
+        case PQ_ACTION_DELETE:
+          rb_ary_push(rb_ary, RB_ID2SYM(id_minus));
+          break;
+        default:
+          break;
+      } 
+    }
+  }
+}
+
+static void
 pq_atom_to_rb_ary(PQAtom atom, VALUE rb_ary, Language *language, bool raw, PQAction action) {
   if(raw) {
     if(atom.empty) {
@@ -1652,27 +1672,6 @@ pq_atom_to_rb_ary(PQAtom atom, VALUE rb_ary, Language *language, bool raw, PQAct
       rb_ary_push(rb_ary, RB_ID2SYM(language_symbol2id(language, (TSSymbol) atom.node_symbol)));
     }
   }
-  if(action) {
-    if(raw) {
-      rb_ary_push(rb_ary, RB_INT2FIX(action));
-    } else {
-      switch(action) {
-        case PQ_ACTION_INSERT:
-          rb_ary_push(rb_ary, RB_ID2SYM(id_plus));
-          break;
-        case PQ_ACTION_DELETE:
-          rb_ary_push(rb_ary, RB_ID2SYM(id_minus));
-          break;
-        default:
-          break;
-      } 
-    }
-  }
-
-  // fprintf(stderr, "to_rb_ary: %s")
-  rb_p(rb_ary);
-  rb_io_flush(rb_stdout);
-  fprintf(stderr, "xxx\n");
 }
 
 
@@ -1694,6 +1693,9 @@ pq_atom_to_rb_ary(PQAtom atom, VALUE rb_ary, Language *language, bool raw, PQAct
 static VALUE
 rb_new_pq_gram_ary_from_shift_registers(ShiftRegister *anc, ShiftRegister *sib, Language *language, bool raw, PQAction action) {
   VALUE rb_ary = rb_ary_new_capa(anc->size + sib->size);
+
+  pq_action_to_rb_ary(rb_ary, action, raw);
+
   for(size_t i = 0; i < anc->size; i++) {
     PQAtom atom = shift_register_get(anc, i);
     pq_atom_to_rb_ary(atom, rb_ary, language, raw, action);
@@ -1785,8 +1787,8 @@ find_field_id(TSNode parent, TSNode child) {
 
 
 
-static VALUE
-rb_node_pq_profile_(TSNode node, Tree *tree, VALUE rb_p, VALUE rb_q, VALUE rb_include_root_parents, VALUE rb_raw, VALUE rb_max_depth)
+void
+rb_node_pq_profile_(TSNode node, Tree *tree, PQAction action, VALUE rb_p, VALUE rb_q, VALUE rb_include_root_ancestors, VALUE rb_raw, VALUE rb_max_depth, VALUE rb_profile)
 {
   Check_Type(rb_p, T_FIXNUM);
   Check_Type(rb_q, T_FIXNUM);
@@ -1796,10 +1798,10 @@ rb_node_pq_profile_(TSNode node, Tree *tree, VALUE rb_p, VALUE rb_q, VALUE rb_in
 
   if(!(p > 1 && q > 1)) {
     rb_raise(rb_eArgError, "p and q must be > 1");
-    return Qnil;
+    return;
   }
 
-  bool include_root_parents = RTEST(rb_include_root_parents);
+  bool include_root_ancestors = RTEST(rb_include_root_ancestors);
   bool raw = RTEST(rb_raw);
   int max_depth;
   if(RB_NIL_P(rb_max_depth)) {
@@ -1811,7 +1813,7 @@ rb_node_pq_profile_(TSNode node, Tree *tree, VALUE rb_p, VALUE rb_q, VALUE rb_in
   ShiftRegister anc;
   shift_register_init(&anc, p, NULL);
 
-  if(include_root_parents && p > 1) {
+  if(include_root_ancestors && p > 1) {
     PQAtom *stack;
     bool heap = p - 1 > 10;
     if(heap) {
@@ -1822,7 +1824,7 @@ rb_node_pq_profile_(TSNode node, Tree *tree, VALUE rb_p, VALUE rb_q, VALUE rb_in
     size_t stack_len = 0;
 
     TSNode child = node;
-    for(size_t i = 0; i < p - 1; p++) {
+    for(size_t i = 0; i < p - 1; i++) {
       TSNode parent = ts_node_parent(child);
       if(!ts_node_is_null(parent)) {
         uint16_t field_id = find_field_id(parent, child);
@@ -1845,15 +1847,13 @@ rb_node_pq_profile_(TSNode node, Tree *tree, VALUE rb_p, VALUE rb_q, VALUE rb_in
     }
   }
 
-  VALUE rb_profile = rb_ary_new_capa(256);
-
   PQProfileContext ctx = {
     .tree = tree,
     .rb_ary = rb_profile,
     .anc = &anc,
     .q = q,
     .raw = raw,
-    .action = PQ_ACTION_NONE,
+    .action = action,
     .max_depth = max_depth
   };
 
@@ -1862,20 +1862,18 @@ rb_node_pq_profile_(TSNode node, Tree *tree, VALUE rb_p, VALUE rb_q, VALUE rb_in
   ts_tree_cursor_delete(&cursor);
 
   shift_register_destroy(&anc);
-
-  return rb_profile;
 }
 
-
-
 static VALUE
-rb_node_pq_profile(VALUE self, VALUE rb_p, VALUE rb_q, VALUE rb_include_root_parents, VALUE rb_raw, VALUE rb_max_depth)
+rb_node_pq_profile(VALUE self, VALUE rb_p, VALUE rb_q, VALUE rb_include_root_ancestors, VALUE rb_raw, VALUE rb_max_depth)
 {
   AstNode *node;
   TypedData_Get_Struct(self, AstNode, &node_type, node);
 
   Tree *tree = node_get_tree(node);
-  return rb_node_pq_profile_(node->ts_node, tree, rb_p, rb_q, rb_include_root_parents, rb_raw, rb_max_depth);
+  VALUE rb_profile = rb_ary_new_capa(32);
+  rb_node_pq_profile_(node->ts_node, tree, PQ_ACTION_NONE, rb_p, rb_q, rb_include_root_ancestors, rb_raw, rb_max_depth, rb_profile);
+  return rb_profile;
 }
 
 static VALUE

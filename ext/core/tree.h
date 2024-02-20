@@ -50,6 +50,8 @@ VALUE rb_tree_path_to(VALUE self, VALUE rb_token_node_or_goal_byte);
 void init_tree();
 VALUE rb_new_language(TSLanguage *ts_language, LanguageId id);
 
+Tree *rb_tree_unwrap(VALUE rb_tree);
+
 extern const rb_data_type_t language_type;
 extern const rb_data_type_t tree_type;
 
